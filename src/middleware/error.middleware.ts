@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import { AppError } from '../utils/errors';
 
 export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
@@ -13,7 +13,6 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
   }
 
   console.error('Error no controlado:', err);
-
   res.status(500).json({
     error: {
       codigo: 'ERROR_INTERNO',
@@ -21,3 +20,4 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     },
   });
 }
+

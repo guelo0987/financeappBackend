@@ -11,7 +11,12 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
 
   try {
     const token = header.split(' ')[1];
-    req.user = verificarToken(token);
+    const payload = verificarToken(token);
+    if (payload.type !== 'access') {
+      throw new UnauthorizedError('TOKEN_INVALIDO', 'El token no es válido para esta operación.');
+    }
+    req.user = payload;
+    req.userId = payload.sub;
     next();
   } catch {
     throw new UnauthorizedError('TOKEN_INVALIDO', 'El token es inválido o ha expirado.');

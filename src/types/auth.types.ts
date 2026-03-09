@@ -1,4 +1,4 @@
-export interface RegistroDTO {
+export interface RegisterDTO {
   nombre: string;
   email: string;
   password: string;
@@ -10,14 +10,36 @@ export interface LoginDTO {
   password: string;
 }
 
-export interface JwtPayload {
-  usuario_id: number;
-  email: string;
+export interface RefreshDTO {
+  refreshToken: string;
 }
 
-export interface AuthResponse {
+export interface UpdateProfileDTO {
+  nombre?: string;
+  moneda_base?: 'DOP' | 'USD';
+  meta_financiera?: string | null;
+  meta_monto?: number | null;
+  meta_fecha?: string | null;
+}
+
+export interface ChangePasswordDTO {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface JwtPayload {
+  sub: number;
+  email: string;
+  type: 'access' | 'refresh';
+}
+
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface AuthResponse extends TokenPair {
   usuario: UsuarioPublico;
-  token: string;
 }
 
 export interface LoginResponse extends AuthResponse {

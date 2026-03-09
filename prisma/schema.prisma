@@ -10,65 +10,71 @@ datasource db {
 
 /// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model usuarios {
-  usuario_id            BigInt                 @id @default(autoincrement())
-  nombre                String
-  email                 String
-  password_hash         String
-  moneda_base           String                 @default("DOP")
-  meta_financiera       String?
-  meta_monto            Decimal?               @db.Decimal(15, 2)
-  meta_fecha            DateTime?              @db.Date
-  creado_en             DateTime               @default(now()) @db.Timestamptz(6)
-  actualizado_en        DateTime               @default(now()) @updatedAt @db.Timestamptz(6)
-  activos               activos[]
-  alertas               alertas[]
-  categorias            categorias[]
-  invitaciones_enviadas espacio_invitaciones[]
-  espacio_miembros      espacio_miembros[]
-  espacios_creados      espacios_compartidos[] @relation("creador")
-  suscripciones         suscripciones?
-  transacciones         transacciones[]
+  usuario_id                BigInt                      @id @default(autoincrement())
+  nombre                    String
+  email                     String
+  password_hash             String
+  moneda_base               String                      @default("DOP")
+  meta_financiera           String?
+  meta_monto                Decimal?                    @db.Decimal(15, 2)
+  meta_fecha                DateTime?                   @db.Date
+  creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
+  actualizado_en            DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
+  color_hex                 String                      @default("#065F46")
+  iniciales                 String                      @default("")
+  activos                   activos[]
+  alertas                   alertas[]
+  categorias                categorias[]
+  invitaciones_enviadas     espacio_invitaciones[]
+  espacio_miembros          espacio_miembros[]
+  espacios_creados          espacios_compartidos[]      @relation("creador")
+  presupuestos              presupuestos[]
+  suscripciones             suscripciones?
+  transacciones             transacciones[]
+  transacciones_recurrentes transacciones_recurrentes[]
 }
 
 model suscripciones {
-  suscripcion_id   BigInt             @id @default(autoincrement())
-  usuario_id       BigInt             @unique(map: "suscripciones_usuario_id_idx")
-  estado           estado_suscripcion @default(prueba)
-  plan             String             @default("mensual")
-  precio_usd       Decimal            @default(5.00) @db.Decimal(6, 2)
-  revenuecat_id    String?            @unique
-  apple_product_id String?
-  trial_inicio     DateTime           @default(now()) @db.Timestamptz(6)
-  trial_fin        DateTime           @default(dbgenerated("(now() + '5 days'::interval)")) @db.Timestamptz(6)
-  periodo_inicio   DateTime?          @db.Timestamptz(6)
-  periodo_fin      DateTime?          @db.Timestamptz(6)
-  cancelado_en     DateTime?          @db.Timestamptz(6)
-  creado_en        DateTime           @default(now()) @db.Timestamptz(6)
-  actualizado_en   DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
-  usuario          usuarios           @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
+  suscripcion_id BigInt             @id @default(autoincrement())
+  usuario_id     BigInt             @unique(map: "suscripciones_usuario_id_idx")
+  estado         estado_suscripcion @default(prueba)
+  plan           String             @default("mensual")
+  precio_usd     Decimal            @default(5.00) @db.Decimal(6, 2)
+  revenuecat_id  String?            @unique
+  trial_inicio   DateTime           @default(now()) @db.Timestamptz(6)
+  trial_fin      DateTime           @default(dbgenerated("(now() + '5 days'::interval)")) @db.Timestamptz(6)
+  periodo_inicio DateTime?          @db.Timestamptz(6)
+  periodo_fin    DateTime?          @db.Timestamptz(6)
+  cancelado_en   DateTime?          @db.Timestamptz(6)
+  creado_en      DateTime           @default(now()) @db.Timestamptz(6)
+  actualizado_en DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
+  usuario        usuarios           @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([estado])
   @@index([periodo_fin])
 }
 
 model activos {
-  activo_id             BigInt                      @id @default(autoincrement())
-  usuario_id            BigInt
-  nombre                String
-  tipo                  tipo_activo
-  institucion_nombre    String?
-  institucion_codigo    String?
-  moneda                String                      @default("DOP")
-  valor_actual          Decimal                     @default(0.00) @db.Decimal(15, 2)
-  ticker_simbolo        String?
-  creado_en             DateTime                    @default(now()) @db.Timestamptz(6)
-  actualizado_en        DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
-  espacio_id            BigInt?
-  espacio               espacios_compartidos?       @relation(fields: [espacio_id], references: [espacio_id], onUpdate: NoAction)
-  usuario               usuarios                    @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
-  historial             historial_valores_activos[]
-  transacciones_destino transacciones[]             @relation("activo_destino")
-  transacciones_origen  transacciones[]             @relation("activo_origen")
+  activo_id                 BigInt                      @id @default(autoincrement())
+  usuario_id                BigInt
+  nombre                    String
+  tipo                      tipo_activo
+  institucion_nombre        String?
+  moneda                    String                      @default("DOP")
+  valor_actual              Decimal                     @default(0.00) @db.Decimal(15, 2)
+  ticker_simbolo            String?
+  creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
+  actualizado_en            DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
+  espacio_id                BigInt?
+  subtipo                   String?
+  color_hex                 String                      @default("#4F46E5")
+  icono                     String                      @default("landmark")
+  espacio                   espacios_compartidos?       @relation(fields: [espacio_id], references: [espacio_id], onUpdate: NoAction)
+  usuario                   usuarios                    @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
+  historial                 historial_valores_activos[]
+  transacciones_destino     transacciones[]             @relation("activo_destino")
+  transacciones_origen      transacciones[]             @relation("activo_origen")
+  transacciones_recurrentes transacciones_recurrentes[]
 
   @@index([usuario_id])
   @@index([usuario_id, tipo])
@@ -78,7 +84,6 @@ model historial_valores_activos {
   activo_id BigInt
   fecha     DateTime @db.Date
   valor     Decimal  @db.Decimal(15, 2)
-  moneda    String
   activo    activos  @relation(fields: [activo_id], references: [activo_id], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([activo_id, fecha])
@@ -86,16 +91,19 @@ model historial_valores_activos {
 }
 
 model categorias {
-  categoria_id  BigInt           @id @default(autoincrement())
-  usuario_id    BigInt?
-  nombre        String
-  tipo          tipo_transaccion
-  icono         String           @default("dollarsign.circle")
-  color_hex     String           @default("#C9A84C")
-  es_sistema    Boolean          @default(false)
-  creado_en     DateTime         @default(now()) @db.Timestamptz(6)
-  usuario       usuarios?        @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
-  transacciones transacciones[]
+  categoria_id              BigInt                      @id @default(autoincrement())
+  usuario_id                BigInt?
+  nombre                    String
+  tipo                      tipo_transaccion
+  icono                     String                      @default("circle")
+  color_hex                 String                      @default("#C9A84C")
+  es_sistema                Boolean                     @default(false)
+  creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
+  slug                      String?
+  usuario                   usuarios?                   @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
+  presupuesto_categorias    presupuesto_categorias[]
+  transacciones             transacciones[]
+  transacciones_recurrentes transacciones_recurrentes[]
 
   @@unique([usuario_id, nombre, tipo])
   @@index([usuario_id])
@@ -110,16 +118,15 @@ model transacciones {
   monto                  Decimal               @db.Decimal(15, 2)
   moneda                 String                @default("DOP")
   tasa_cambio            Decimal?              @db.Decimal(10, 4)
-  monto_dop              Decimal?              @db.Decimal(15, 2)
   categoria_id           BigInt?
   descripcion            String?
   fecha                  DateTime              @default(dbgenerated("CURRENT_DATE")) @db.Date
   origen                 String                @default("app")
-  categoria_ia_sugerida  String?
   categoria_ia_confianza Decimal?              @db.Decimal(3, 2)
   creado_en              DateTime              @default(now()) @db.Timestamptz(6)
   actualizado_en         DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
   espacio_id             BigInt?
+  nota                   String?
   activo_destino         activos?              @relation("activo_destino", fields: [activo_destino_id], references: [activo_id], onUpdate: NoAction)
   activo                 activos?              @relation("activo_origen", fields: [activo_id], references: [activo_id], onUpdate: NoAction)
   categoria              categorias?           @relation(fields: [categoria_id], references: [categoria_id], onUpdate: NoAction)
@@ -163,6 +170,7 @@ model espacios_compartidos {
   invitaciones   espacio_invitaciones[]
   miembros       espacio_miembros[]
   creador        usuarios               @relation("creador", fields: [creado_por], references: [usuario_id], onUpdate: NoAction)
+  presupuestos   presupuestos[]
   transacciones  transacciones[]
 
   @@index([creado_por])
@@ -237,6 +245,59 @@ model sync_log {
   completado_en          DateTime? @db.Timestamptz(6)
 
   @@index([fuente, iniciado_en(sort: Desc)])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model presupuesto_categorias {
+  presupuesto_id BigInt
+  categoria_id   BigInt
+  limite         Decimal      @db.Decimal
+  categorias     categorias   @relation(fields: [categoria_id], references: [categoria_id], onDelete: NoAction, onUpdate: NoAction)
+  presupuestos   presupuestos @relation(fields: [presupuesto_id], references: [presupuesto_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([presupuesto_id, categoria_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model presupuestos {
+  presupuesto_id         BigInt                   @id @default(autoincrement())
+  usuario_id             BigInt
+  espacio_id             BigInt?
+  nombre                 String
+  periodo                String
+  dia_inicio             Int                      @default(1)
+  ingresos               Decimal                  @default(0) @db.Decimal
+  activo                 Boolean                  @default(true)
+  creado_en              DateTime                 @default(now()) @db.Timestamptz(6)
+  actualizado_en         DateTime                 @default(now()) @db.Timestamptz(6)
+  presupuesto_categorias presupuesto_categorias[]
+  espacios_compartidos   espacios_compartidos?    @relation(fields: [espacio_id], references: [espacio_id], onDelete: NoAction, onUpdate: NoAction)
+  usuarios               usuarios                 @relation(fields: [usuario_id], references: [usuario_id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transacciones_recurrentes {
+  recurrente_id     BigInt           @id @default(autoincrement())
+  usuario_id        BigInt
+  activo_id         BigInt?
+  categoria_id      BigInt?
+  tipo              tipo_transaccion
+  monto             Decimal          @db.Decimal
+  moneda            String           @default("DOP")
+  descripcion       String?
+  frecuencia        String
+  dia_ejecucion     Int
+  activo            Boolean          @default(true)
+  proxima_ejecucion DateTime?        @db.Date
+  creado_en         DateTime         @default(now()) @db.Timestamptz(6)
+  actualizado_en    DateTime         @default(now()) @db.Timestamptz(6)
+  nota              String?
+  activos           activos?         @relation(fields: [activo_id], references: [activo_id], onDelete: NoAction, onUpdate: NoAction)
+  categorias        categorias?      @relation(fields: [categoria_id], references: [categoria_id], onDelete: NoAction, onUpdate: NoAction)
+  usuarios          usuarios         @relation(fields: [usuario_id], references: [usuario_id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 enum tipo_activo {
