@@ -288,6 +288,7 @@ model presupuestos {
   actualizado_en         DateTime                 @default(now()) @db.Timestamptz(6)
   presupuesto_categorias presupuesto_categorias[]
   presupuesto_ingresos   presupuesto_ingresos[]
+  transacciones_recurrentes transacciones_recurrentes[]
   transacciones          transacciones[]
   espacios_compartidos   espacios_compartidos?    @relation(fields: [espacio_id], references: [espacio_id], onDelete: NoAction, onUpdate: NoAction)
   usuarios               usuarios                 @relation(fields: [usuario_id], references: [usuario_id], onDelete: NoAction, onUpdate: NoAction)
@@ -298,6 +299,7 @@ model presupuestos {
 model transacciones_recurrentes {
   recurrente_id     BigInt           @id @default(autoincrement())
   usuario_id        BigInt
+  presupuesto_id    BigInt?
   activo_id         BigInt?
   categoria_id      BigInt?
   tipo              tipo_transaccion
@@ -313,6 +315,7 @@ model transacciones_recurrentes {
   nota              String?
   activos           activos?         @relation(fields: [activo_id], references: [activo_id], onDelete: NoAction, onUpdate: NoAction)
   categorias        categorias?      @relation(fields: [categoria_id], references: [categoria_id], onDelete: NoAction, onUpdate: NoAction)
+  presupuestos      presupuestos?    @relation(fields: [presupuesto_id], references: [presupuesto_id], onDelete: NoAction, onUpdate: NoAction)
   usuarios          usuarios         @relation(fields: [usuario_id], references: [usuario_id], onDelete: NoAction, onUpdate: NoAction)
 }
 

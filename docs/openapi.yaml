@@ -314,8 +314,21 @@ components:
                 type: number
     RecurringRequest:
       type: object
-      required: [tipo, monto, frecuencia, diaEjecucion]
+      required: [budgetId, tipo, monto, frecuencia, diaEjecucion]
+      example:
+        budgetId: 1
+        walletId: 10
+        catKey: salario
+        tipo: ingreso
+        monto: 25000
+        moneda: DOP
+        descripcion: Salario mensual
+        frecuencia: mensual
+        diaEjecucion: 25
+        activo: true
       properties:
+        budgetId:
+          type: integer
         walletId:
           type: integer
           nullable: true
@@ -348,7 +361,13 @@ components:
     RecurringUpdateRequest:
       type: object
       description: All fields are optional.
+      example:
+        budgetId: 2
+        monto: 28000
+        diaEjecucion: 28
       properties:
+        budgetId:
+          type: integer
         walletId:
           type: integer
           nullable: true

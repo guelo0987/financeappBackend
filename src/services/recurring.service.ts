@@ -6,6 +6,7 @@ import { CreateRecurringDTO, UpdateRecurringDTO } from '../types/recurring.types
 const supabase: any = getSupabaseClient();
 
 const createSchema = z.object({
+  budgetId: z.number().int().positive(),
   walletId: z.number().int().positive().nullable().optional(),
   catKey: z.string().min(1).max(80).nullable().optional(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']),
@@ -19,6 +20,7 @@ const createSchema = z.object({
 });
 
 const updateSchema = z.object({
+  budgetId: z.number().int().positive().optional(),
   walletId: z.number().int().positive().nullable().optional(),
   catKey: z.string().min(1).max(80).nullable().optional(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']).optional(),
@@ -36,7 +38,7 @@ export class RecurringService {
     const { data, error } = await supabase
       .from('transacciones_recurrentes')
       .select(
-        'recurrente_id, usuario_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
       )
       .eq('usuario_id', userId)
       .order('activo', { ascending: false })
@@ -51,6 +53,7 @@ export class RecurringService {
     if (!parsed.success) throw new BadRequestError('VALIDACION_ERROR', parsed.error.message);
     const payload = parsed.data;
 
+    await this.getAccessibleBudget(userId, payload.budgetId);
     if (payload.walletId) await this.validateWalletOwnership(userId, payload.walletId);
     const categoriaId = await this.resolveCategoryId(userId, payload.catKey ?? null);
 
@@ -58,6 +61,7 @@ export class RecurringService {
       .from('transacciones_recurrentes')
       .insert({
         usuario_id: userId,
+        presupuesto_id: payload.budgetId,
         activo_id: payload.walletId ?? null,
         categoria_id: categoriaId,
         tipo: payload.tipo,
@@ -71,7 +75,7 @@ export class RecurringService {
         proxima_ejecucion: this.computeNextExecutionDate(payload.frecuencia, payload.diaEjecucion),
       })
       .select(
-        'recurrente_id, usuario_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
       )
       .single();
 
@@ -84,6 +88,8 @@ export class RecurringService {
     if (!parsed.success) throw new BadRequestError('VALIDACION_ERROR', parsed.error.message);
     const payload = parsed.data;
     const existing = await this.getOwnedRecurring(userId, id);
+    const nextBudgetId = payload.budgetId ?? Number(existing.presupuesto_id);
+    await this.getAccessibleBudget(userId, nextBudgetId);
 
     const nextWalletId = payload.walletId !== undefined ? payload.walletId : existing.activo_id;
     if (nextWalletId) await this.validateWalletOwnership(userId, Number(nextWalletId));
@@ -94,6 +100,7 @@ export class RecurringService {
     }
 
     const updateData: Record<string, unknown> = {};
+    if (payload.budgetId !== undefined) updateData.presupuesto_id = payload.budgetId;
     if (payload.walletId !== undefined) updateData.activo_id = payload.walletId;
     if (categoriaId !== undefined) updateData.categoria_id = categoriaId;
     if (payload.tipo !== undefined) updateData.tipo = payload.tipo;
@@ -119,7 +126,7 @@ export class RecurringService {
       .eq('recurrente_id', id)
       .eq('usuario_id', userId)
       .select(
-        'recurrente_id, usuario_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
       )
       .maybeSingle();
 
@@ -138,7 +145,7 @@ export class RecurringService {
       .eq('recurrente_id', id)
       .eq('usuario_id', userId)
       .select(
-        'recurrente_id, usuario_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
       )
       .maybeSingle();
 
@@ -163,7 +170,7 @@ export class RecurringService {
     let query = supabase
       .from('transacciones_recurrentes')
       .select(
-        'recurrente_id, usuario_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion',
       )
       .eq('activo', true);
 
@@ -178,9 +185,12 @@ export class RecurringService {
     for (const rec of data ?? []) {
       try {
         if (!this.isDueToday(rec, today)) continue;
+        const budget = await this.getAccessibleBudget(Number(rec.usuario_id), Number(rec.presupuesto_id));
 
         const { error: insertError } = await supabase.from('transacciones').insert({
           usuario_id: rec.usuario_id,
+          presupuesto_id: rec.presupuesto_id,
+          espacio_id: budget.espacio_id ? Number(budget.espacio_id) : null,
           activo_id: rec.activo_id ?? null,
           activo_destino_id: null,
           tipo: rec.tipo,
@@ -196,6 +206,13 @@ export class RecurringService {
         if (insertError) {
           errors += 1;
           continue;
+        }
+
+        if (rec.activo_id) {
+          const delta = rec.tipo === 'ingreso' ? Number(rec.monto) : rec.tipo === 'gasto' ? -Number(rec.monto) : 0;
+          if (delta !== 0) {
+            await this.applyWalletAdjustment(Number(rec.usuario_id), Number(rec.activo_id), delta);
+          }
         }
 
         const nextDate = this.computeNextExecutionDate(rec.frecuencia, Number(rec.dia_ejecucion), today);
@@ -225,7 +242,7 @@ export class RecurringService {
     const { data, error } = await supabase
       .from('transacciones_recurrentes')
       .select(
-        'recurrente_id, usuario_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en',
       )
       .eq('recurrente_id', id)
       .eq('usuario_id', userId)
@@ -322,6 +339,7 @@ export class RecurringService {
     const category = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
     return {
       id: Number(row.recurrente_id),
+      budgetId: row.presupuesto_id ? Number(row.presupuesto_id) : null,
       walletId: row.activo_id ? Number(row.activo_id) : null,
       categoriaId: row.categoria_id ? Number(row.categoria_id) : null,
       catKey: category?.slug ?? null,
@@ -350,5 +368,56 @@ export class RecurringService {
 
   private daysInMonth(year: number, month: number): number {
     return new Date(Date.UTC(year, month, 0)).getUTCDate();
+  }
+
+  private async getAccessibleBudget(userId: number, budgetId: number): Promise<any> {
+    const { data, error } = await supabase
+      .from('presupuestos')
+      .select('presupuesto_id, usuario_id, espacio_id')
+      .eq('presupuesto_id', budgetId)
+      .maybeSingle();
+
+    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo validar el presupuesto.');
+    if (!data) throw new NotFoundError('NOT_FOUND', 'Presupuesto no encontrado.');
+    if (Number(data.usuario_id) === userId) return data;
+    if (data.espacio_id) {
+      const { data: member, error: memberError } = await supabase
+        .from('espacio_miembros')
+        .select('usuario_id')
+        .eq('espacio_id', Number(data.espacio_id))
+        .eq('usuario_id', userId)
+        .maybeSingle();
+      if (memberError) throw new BadRequestError('DB_ERROR', 'No se pudo validar membresía del espacio.');
+      if (!member) throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No tiene acceso al presupuesto.');
+      return data;
+    }
+    throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No tiene acceso al presupuesto.');
+  }
+
+  private async applyWalletAdjustment(userId: number, walletId: number, delta: number): Promise<void> {
+    const { data: wallet, error: readError } = await supabase
+      .from('activos')
+      .select('activo_id, valor_actual')
+      .eq('activo_id', walletId)
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (readError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo ajustar el balance de la cuenta.');
+    }
+    if (!wallet) {
+      throw new NotFoundError('NOT_FOUND', 'Cuenta no encontrada para aplicar recurrente.');
+    }
+
+    const nextBalance = Number(wallet.valor_actual) + delta;
+    const { error: writeError } = await supabase
+      .from('activos')
+      .update({ valor_actual: nextBalance, actualizado_en: new Date().toISOString() })
+      .eq('activo_id', walletId)
+      .eq('usuario_id', userId);
+
+    if (writeError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el balance de la cuenta.');
+    }
   }
 }
