@@ -71,7 +71,7 @@ export class InsightsService {
 
     const { data: categories, error } = await supabase
       .from('presupuesto_categorias')
-      .select('categoria_id, limite, categorias(slug, nombre, icono, color_hex)')
+      .select('categoria_id, limite, categorias(slug, nombre, icono)')
       .eq('presupuesto_id', budgetId);
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar categorías del presupuesto.');
 
@@ -105,7 +105,6 @@ export class InsightsService {
         slug: cat?.slug ?? null,
         nombre: cat?.nombre ?? null,
         icono: cat?.icono ?? null,
-        color: cat?.color_hex ?? null,
         limite,
         gastado,
         exceso: gastado - limite,
@@ -158,7 +157,7 @@ export class InsightsService {
     const safeLimit = Math.max(1, Math.min(50, limit));
     const { data, error } = await supabase
       .from('transacciones')
-      .select('transaccion_id, tipo, monto, moneda, descripcion, fecha, categoria_id, categorias(slug, nombre, icono, color_hex)')
+      .select('transaccion_id, tipo, monto, moneda, descripcion, fecha, categoria_id, categorias(slug, nombre, icono)')
       .eq('usuario_id', userId)
       .eq('tipo', 'gasto')
       .order('monto', { ascending: false })
@@ -176,7 +175,7 @@ export class InsightsService {
         descripcion: row.descripcion,
         fecha: row.fecha,
         categoria: cat
-          ? { slug: cat.slug, nombre: cat.nombre, icono: cat.icono, color: cat.color_hex }
+          ? { slug: cat.slug, nombre: cat.nombre, icono: cat.icono }
           : null,
       };
     });
@@ -323,4 +322,3 @@ export class InsightsService {
     return date.toISOString().slice(0, 10);
   }
 }
-

@@ -69,16 +69,12 @@ components:
       example:
         nombre: Conciertos
         icono: music
-        color_hex: "#C9A84C"
         categoria_padre_id: 6
       properties:
         nombre:
           type: string
         icono:
           type: string
-        color_hex:
-          type: string
-          example: "#C9A84C"
         categoria_padre_id:
           type: integer
           nullable: true
@@ -88,16 +84,12 @@ components:
       example:
         nombre: Conciertos y Eventos
         icono: ticket
-        color_hex: "#F59E0B"
         categoria_padre_id: 6
       properties:
         nombre:
           type: string
         icono:
           type: string
-        color_hex:
-          type: string
-          example: "#C9A84C"
         categoria_padre_id:
           type: integer
           nullable: true

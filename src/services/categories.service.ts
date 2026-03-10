@@ -8,14 +8,12 @@ const supabase: any = getSupabaseClient();
 const createCategorySchema = z.object({
   nombre: z.string().min(1, 'nombre requerido').max(80, 'nombre demasiado largo'),
   icono: z.string().min(1).max(80).optional(),
-  color_hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'color_hex inválido').optional(),
   categoria_padre_id: z.number().int().positive().nullable().optional(),
 });
 
 const updateCategorySchema = z.object({
   nombre: z.string().min(1).max(80).optional(),
   icono: z.string().min(1).max(80).optional(),
-  color_hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   categoria_padre_id: z.number().int().positive().nullable().optional(),
 });
 
@@ -31,7 +29,6 @@ export class CategoriesService {
         usuario_id: parent.usuario_id ? Number(parent.usuario_id) : null,
         nombre: parent.nombre,
         icono: parent.icono,
-        color_hex: parent.color_hex,
         es_sistema: !!parent.es_sistema,
         slug: parent.slug,
         creado_en: parent.creado_en,
@@ -44,7 +41,6 @@ export class CategoriesService {
           usuario_id: child.usuario_id ? Number(child.usuario_id) : null,
           nombre: child.nombre,
           icono: child.icono,
-          color_hex: child.color_hex,
           es_sistema: !!child.es_sistema,
           slug: child.slug,
           creado_en: child.creado_en,
@@ -57,7 +53,7 @@ export class CategoriesService {
   async getAllForUser(userId: number) {
     const { data, error } = await supabase
       .from('categorias')
-      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, color_hex, es_sistema, slug, creado_en')
+      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, es_sistema, slug, creado_en')
       .or(`es_sistema.eq.true,usuario_id.eq.${userId}`)
       .order('categoria_padre_id', { ascending: true, nullsFirst: true })
       .order('es_sistema', { ascending: false })
@@ -73,7 +69,7 @@ export class CategoriesService {
   async getSystemCategories() {
     const { data, error } = await supabase
       .from('categorias')
-      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, color_hex, es_sistema, slug, creado_en')
+      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, es_sistema, slug, creado_en')
       .eq('es_sistema', true)
       .order('categoria_padre_id', { ascending: true, nullsFirst: true })
       .order('nombre', { ascending: true });
@@ -104,11 +100,10 @@ export class CategoriesService {
         categoria_padre_id: payload.categoria_padre_id ?? null,
         nombre: payload.nombre.trim(),
         icono: payload.icono ?? 'circle',
-        color_hex: payload.color_hex ?? '#C9A84C',
         es_sistema: false,
         slug,
       })
-      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, color_hex, es_sistema, slug, creado_en')
+      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, es_sistema, slug, creado_en')
       .single();
 
     if (error?.code === '23505') {
@@ -140,7 +135,6 @@ export class CategoriesService {
       updateData.slug = this.generateSlug(payload.nombre);
     }
     if (payload.icono !== undefined) updateData.icono = payload.icono;
-    if (payload.color_hex !== undefined) updateData.color_hex = payload.color_hex;
     if (payload.categoria_padre_id !== undefined) {
       if (payload.categoria_padre_id) {
         await this.validateParentCategory(userId, payload.categoria_padre_id, categoryId);
@@ -157,7 +151,7 @@ export class CategoriesService {
       .update(updateData)
       .eq('categoria_id', categoryId)
       .eq('usuario_id', userId)
-      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, color_hex, es_sistema, slug, creado_en')
+      .select('categoria_id, categoria_padre_id, usuario_id, nombre, icono, es_sistema, slug, creado_en')
       .single();
 
     if (error?.code === '23505') {
@@ -191,7 +185,7 @@ export class CategoriesService {
   private async getOwnedMutableCategory(userId: number, categoryId: number) {
     const { data, error } = await supabase
       .from('categorias')
-      .select('categoria_id, categoria_padre_id, usuario_id, es_sistema, nombre, icono, color_hex, slug, creado_en')
+      .select('categoria_id, categoria_padre_id, usuario_id, es_sistema, nombre, icono, slug, creado_en')
       .eq('categoria_id', categoryId)
       .maybeSingle();
 

@@ -40,7 +40,7 @@ export class DashboardService {
     const range = this.computeBudgetRange(budget);
     const { data: categories, error: catError } = await supabase
       .from('presupuesto_categorias')
-      .select('categoria_id, limite, categorias(slug, nombre, icono, color_hex)')
+      .select('categoria_id, limite, categorias(slug, nombre, icono)')
       .eq('presupuesto_id', budget.presupuesto_id);
     if (catError) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar categorías del presupuesto.');
 
@@ -74,7 +74,6 @@ export class DashboardService {
         slug: cat?.slug ?? null,
         nombre: cat?.nombre ?? null,
         icono: cat?.icono ?? null,
-        color: cat?.color_hex ?? null,
         limite,
         gastado,
         percentUsed,
@@ -152,7 +151,7 @@ export class DashboardService {
     const { data, error } = await supabase
       .from('transacciones')
       .select(
-        'transaccion_id, tipo, monto, moneda, descripcion, fecha, categoria_id, categorias(slug, nombre, icono, color_hex)',
+        'transaccion_id, tipo, monto, moneda, descripcion, fecha, categoria_id, categorias(slug, nombre, icono)',
       )
       .eq('usuario_id', userId)
       .order('fecha', { ascending: false })
@@ -175,7 +174,6 @@ export class DashboardService {
               slug: category.slug,
               nombre: category.nombre,
               icono: category.icono,
-              color: category.color_hex,
             }
           : null,
       };
@@ -185,7 +183,7 @@ export class DashboardService {
   private async getTopCategories(userId: number, range: { desde: string; hasta: string }) {
     const { data, error } = await supabase
       .from('transacciones')
-      .select('monto, categoria_id, categorias(slug, nombre, icono, color_hex)')
+      .select('monto, categoria_id, categorias(slug, nombre, icono)')
       .eq('usuario_id', userId)
       .eq('tipo', 'gasto')
       .gte('fecha', range.desde)
@@ -214,7 +212,6 @@ export class DashboardService {
         nombre: entry.meta.nombre,
         monto: entry.monto,
         icono: entry.meta.icono,
-        color: entry.meta.color_hex,
       }));
   }
 

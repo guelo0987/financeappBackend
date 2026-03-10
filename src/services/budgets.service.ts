@@ -322,7 +322,7 @@ export class BudgetsService {
   private async getBudgetCategories(budgetId: number) {
     const { data, error } = await supabase
       .from('presupuesto_categorias')
-      .select('categoria_id, limite, categorias(categoria_id, slug, nombre, icono, color_hex)')
+      .select('categoria_id, limite, categorias(categoria_id, slug, nombre, icono)')
       .eq('presupuesto_id', budgetId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar las categorías del presupuesto.');
@@ -425,7 +425,6 @@ export class BudgetsService {
         slug: cat?.slug ?? null,
         nombre: cat?.nombre ?? null,
         icono: cat?.icono ?? null,
-        color_hex: cat?.color_hex ?? null,
         limite,
         gastado,
         restante: Math.max(0, limite - gastado),
@@ -483,7 +482,7 @@ export class BudgetsService {
     const budgetId = Number(budget.presupuesto_id);
     const { data, error } = await supabase
       .from('presupuesto_ingresos')
-      .select('categoria_id, monto_planeado, categorias(categoria_id, slug, nombre, icono, color_hex)')
+      .select('categoria_id, monto_planeado, categorias(categoria_id, slug, nombre, icono)')
       .eq('presupuesto_id', budgetId);
 
     if (error) {
@@ -501,7 +500,6 @@ export class BudgetsService {
           slug: cat?.slug ?? null,
           nombre: cat?.nombre ?? null,
           icono: cat?.icono ?? null,
-          color_hex: cat?.color_hex ?? null,
           monto_planeado: Number(row.monto_planeado),
         };
       });
@@ -514,7 +512,6 @@ export class BudgetsService {
           slug: null,
           nombre: 'Ingresos generales',
           icono: null,
-          color_hex: null,
           monto_planeado: Number(budget.ingresos),
         },
       ];

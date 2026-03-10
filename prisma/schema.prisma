@@ -20,8 +20,6 @@ model usuarios {
   meta_fecha                DateTime?                   @db.Date
   creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
   actualizado_en            DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
-  color_hex                 String                      @default("#065F46")
-  iniciales                 String                      @default("")
   activos                   activos[]
   alertas                   alertas[]
   categorias                categorias[]
@@ -70,7 +68,6 @@ model activos {
   icono                     String                      @default("landmark")
   espacio                   espacios_compartidos?       @relation(fields: [espacio_id], references: [espacio_id], onUpdate: NoAction)
   usuario                   usuarios                    @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
-  historial                 historial_valores_activos[]
   transacciones_destino     transacciones[]             @relation("activo_destino")
   transacciones_origen      transacciones[]             @relation("activo_origen")
   transacciones_recurrentes transacciones_recurrentes[]
@@ -79,23 +76,12 @@ model activos {
   @@index([usuario_id, tipo])
 }
 
-model historial_valores_activos {
-  activo_id BigInt
-  fecha     DateTime @db.Date
-  valor     Decimal  @db.Decimal(15, 2)
-  activo    activos  @relation(fields: [activo_id], references: [activo_id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@id([activo_id, fecha])
-  @@index([activo_id, fecha(sort: Desc)])
-}
-
 model categorias {
   categoria_id              BigInt                      @id @default(autoincrement())
   usuario_id                BigInt?
   nombre                    String
   tipo                      tipo_transaccion
   icono                     String                      @default("circle")
-  color_hex                 String                      @default("#C9A84C")
   es_sistema                Boolean                     @default(false)
   creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
   slug                      String?
@@ -117,12 +103,10 @@ model transacciones {
   tipo                   tipo_transaccion
   monto                  Decimal               @db.Decimal(15, 2)
   moneda                 String                @default("DOP")
-  tasa_cambio            Decimal?              @db.Decimal(10, 4)
   categoria_id           BigInt?
   descripcion            String?
   fecha                  DateTime              @default(dbgenerated("CURRENT_DATE")) @db.Date
   origen                 String                @default("app")
-  categoria_ia_confianza Decimal?              @db.Decimal(3, 2)
   creado_en              DateTime              @default(now()) @db.Timestamptz(6)
   actualizado_en         DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
   espacio_id             BigInt?
@@ -205,48 +189,6 @@ model espacio_invitaciones {
   @@index([email_invitado, estado])
   @@index([espacio_id, estado])
   @@index([token])
-}
-
-model cache_precios_crypto {
-  simbolo        String   @id
-  nombre         String
-  precio_usd     Decimal  @db.Decimal(20, 8)
-  cambio_24h_pct Decimal? @db.Decimal(7, 2)
-  actualizado_en DateTime @default(now()) @db.Timestamptz(6)
-}
-
-model cache_precios_mercado {
-  simbolo        String   @id
-  nombre         String
-  tipo           String
-  precio_usd     Decimal  @db.Decimal(20, 4)
-  cambio_24h_pct Decimal? @db.Decimal(7, 2)
-  actualizado_en DateTime @default(now()) @db.Timestamptz(6)
-
-  @@index([tipo])
-}
-
-model cache_tasas_cambio {
-  moneda_origen  String
-  moneda_destino String
-  tasa           Decimal  @db.Decimal(10, 4)
-  fuente         String
-  valido_hasta   DateTime @db.Timestamptz(6)
-
-  @@id([moneda_origen, moneda_destino])
-}
-
-model sync_log {
-  sync_id                BigInt    @id @default(autoincrement())
-  fuente                 String
-  tabla_cache            String
-  registros_actualizados Int?
-  estado                 String
-  error_detalle          String?
-  iniciado_en            DateTime  @default(now()) @db.Timestamptz(6)
-  completado_en          DateTime? @db.Timestamptz(6)
-
-  @@index([fuente, iniciado_en(sort: Desc)])
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

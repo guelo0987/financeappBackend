@@ -58,7 +58,7 @@ export class TransactionsService {
     let query = supabase
       .from('transacciones')
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono, color_hex)',
+        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
         { count: 'exact' },
       );
 
@@ -113,7 +113,7 @@ export class TransactionsService {
     const { data, error } = await supabase
       .from('transacciones')
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono, color_hex)',
+        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
       )
       .eq('transaccion_id', txnId)
       .maybeSingle();
@@ -172,7 +172,7 @@ export class TransactionsService {
         nota: payload.nota ?? null,
       })
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono, color_hex)',
+        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
       )
       .single();
 
@@ -265,7 +265,7 @@ export class TransactionsService {
       .update(updateData)
       .eq('transaccion_id', txnId)
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono, color_hex)',
+        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
       )
       .maybeSingle();
 
@@ -579,7 +579,6 @@ export class TransactionsService {
             slug: category.slug,
             nombre: category.nombre,
             icono: category.icono,
-            color_hex: category.color_hex,
           }
         : null,
       descripcion: row.descripcion,

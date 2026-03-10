@@ -38,7 +38,7 @@ export class RecurringService {
     const { data, error } = await supabase
       .from('transacciones_recurrentes')
       .select(
-        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono)',
       )
       .eq('usuario_id', userId)
       .order('activo', { ascending: false })
@@ -75,7 +75,7 @@ export class RecurringService {
         proxima_ejecucion: this.computeNextExecutionDate(payload.frecuencia, payload.diaEjecucion),
       })
       .select(
-        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono)',
       )
       .single();
 
@@ -126,7 +126,7 @@ export class RecurringService {
       .eq('recurrente_id', id)
       .eq('usuario_id', userId)
       .select(
-        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono)',
       )
       .maybeSingle();
 
@@ -145,7 +145,7 @@ export class RecurringService {
       .eq('recurrente_id', id)
       .eq('usuario_id', userId)
       .select(
-        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono, color_hex)',
+        'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono)',
       )
       .maybeSingle();
 
