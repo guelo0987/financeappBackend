@@ -128,7 +128,7 @@ export class DashboardService {
   private async getWalletTotals(userId: number) {
     const { data, error } = await supabase
       .from('activos')
-      .select('subtipo, valor_actual')
+      .select('tipo, valor_actual')
       .eq('usuario_id', userId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo calcular el resumen de cuentas.');
@@ -137,7 +137,7 @@ export class DashboardService {
     let totalDebt = 0;
     for (const row of data ?? []) {
       const value = Number(row.valor_actual);
-      if (row.subtipo === 'deuda') totalDebt += value;
+      if (row.tipo === 'deudas') totalDebt += value;
       else totalBalance += value;
     }
 

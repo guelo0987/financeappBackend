@@ -6,6 +6,7 @@ export interface CreateTransactionDTO {
   descripcion: string;
   monto: number;
   tipo: TipoTransaccion;
+  budgetId: number;
   catKey: string;
   walletId: number;
   toWalletId?: number;
@@ -18,6 +19,7 @@ export interface UpdateTransactionDTO {
   descripcion?: string;
   monto?: number;
   tipo?: TipoTransaccion;
+  budgetId?: number;
   catKey?: string;
   walletId?: number;
   toWalletId?: number | null;
@@ -28,6 +30,7 @@ export interface UpdateTransactionDTO {
 export interface TransactionFilters {
   page?: number;
   limit?: number;
+  budgetId?: number;
   tipo?: TipoTransaccion;
   catKey?: string;
   desde?: string;
@@ -35,4 +38,3 @@ export interface TransactionFilters {
   walletId?: number;
   search?: string;
 }
-

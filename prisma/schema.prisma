@@ -58,7 +58,7 @@ model activos {
   activo_id                 BigInt                      @id @default(autoincrement())
   usuario_id                BigInt
   nombre                    String
-  tipo                      tipo_activo
+  tipo                      tipo_wallet
   institucion_nombre        String?
   moneda                    String                      @default("DOP")
   valor_actual              Decimal                     @default(0.00) @db.Decimal(15, 2)
@@ -66,7 +66,6 @@ model activos {
   creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
   actualizado_en            DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
   espacio_id                BigInt?
-  subtipo                   String?
   color_hex                 String                      @default("#4F46E5")
   icono                     String                      @default("landmark")
   espacio                   espacios_compartidos?       @relation(fields: [espacio_id], references: [espacio_id], onUpdate: NoAction)
@@ -112,6 +111,7 @@ model categorias {
 model transacciones {
   transaccion_id         BigInt                @id @default(autoincrement())
   usuario_id             BigInt
+  presupuesto_id         BigInt?
   activo_id              BigInt?
   activo_destino_id      BigInt?
   tipo                   tipo_transaccion
@@ -131,11 +131,13 @@ model transacciones {
   activo                 activos?              @relation("activo_origen", fields: [activo_id], references: [activo_id], onUpdate: NoAction)
   categoria              categorias?           @relation(fields: [categoria_id], references: [categoria_id], onUpdate: NoAction)
   espacio                espacios_compartidos? @relation(fields: [espacio_id], references: [espacio_id], onUpdate: NoAction)
+  presupuesto            presupuestos?         @relation(fields: [presupuesto_id], references: [presupuesto_id], onUpdate: NoAction)
   usuario                usuarios              @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([activo_destino_id])
   @@index([activo_id])
   @@index([categoria_id])
+  @@index([presupuesto_id])
   @@index([descripcion(ops: raw("gin_trgm_ops"))], type: Gin)
   @@index([usuario_id, fecha(sort: Desc)])
   @@index([usuario_id, tipo, fecha(sort: Desc)])
@@ -259,6 +261,17 @@ model presupuesto_categorias {
   @@id([presupuesto_id, categoria_id])
 }
 
+model presupuesto_ingresos {
+  presupuesto_id  BigInt
+  categoria_id    BigInt
+  monto_planeado  Decimal      @db.Decimal
+  creado_en       DateTime     @default(now()) @db.Timestamptz(6)
+  categorias      categorias   @relation(fields: [categoria_id], references: [categoria_id], onDelete: NoAction, onUpdate: NoAction)
+  presupuestos    presupuestos @relation(fields: [presupuesto_id], references: [presupuesto_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([presupuesto_id, categoria_id])
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model presupuestos {
@@ -269,10 +282,13 @@ model presupuestos {
   periodo                String
   dia_inicio             Int                      @default(1)
   ingresos               Decimal                  @default(0) @db.Decimal
+  ahorro_objetivo        Decimal                  @default(0) @db.Decimal
   activo                 Boolean                  @default(true)
   creado_en              DateTime                 @default(now()) @db.Timestamptz(6)
   actualizado_en         DateTime                 @default(now()) @db.Timestamptz(6)
   presupuesto_categorias presupuesto_categorias[]
+  presupuesto_ingresos   presupuesto_ingresos[]
+  transacciones          transacciones[]
   espacios_compartidos   espacios_compartidos?    @relation(fields: [espacio_id], references: [espacio_id], onDelete: NoAction, onUpdate: NoAction)
   usuarios               usuarios                 @relation(fields: [usuario_id], references: [usuario_id], onDelete: NoAction, onUpdate: NoAction)
 }
@@ -300,14 +316,10 @@ model transacciones_recurrentes {
   usuarios          usuarios         @relation(fields: [usuario_id], references: [usuario_id], onDelete: NoAction, onUpdate: NoAction)
 }
 
-enum tipo_activo {
-  efectivo
-  cuenta_bancaria
-  inversion
-  crypto
-  inmueble
-  vehiculo
-  otro
+enum tipo_wallet {
+  gastos
+  cuentas
+  deudas
 }
 
 enum tipo_transaccion {

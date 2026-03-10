@@ -1,4 +1,7 @@
 import express from 'express';
+import path from 'path';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
 import authRoutes from './routes/auth.routes';
 import budgetsRoutes from './routes/budgets.routes';
 import categoriesRoutes from './routes/categories.routes';
@@ -13,9 +16,12 @@ import { corsMiddleware } from './middleware/cors.middleware';
 import { errorHandler } from './middleware/error.middleware';
 
 const app = express();
+const openapiPath = path.resolve(process.cwd(), 'docs/openapi.yaml');
+const openapiDocument = YAML.load(openapiPath);
 
 app.use(corsMiddleware);
 app.use(express.json());
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiDocument));
 
 app.get('/health', (_req, res) => {
   res.json({ data: { status: 'ok' } });

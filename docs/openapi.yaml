@@ -1,0 +1,1215 @@
+openapi: 3.0.3
+info:
+  title: FinanceApp Backend API
+  version: 1.0.0
+  description: Swagger documentation for the FinanceApp backend.
+servers:
+  - url: http://localhost:3000
+tags:
+  - name: Health
+  - name: Auth
+  - name: Categories
+  - name: Wallets
+  - name: Transactions
+  - name: Budgets
+  - name: Recurring
+  - name: Dashboard
+  - name: Insights
+  - name: Spaces
+  - name: Invitations
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            codigo:
+              type: string
+            mensaje:
+              type: string
+    RegisterRequest:
+      type: object
+      required: [nombre, email, password]
+      properties:
+        nombre:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        moneda_base:
+          type: string
+          enum: [DOP, USD]
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+    CategoryRequest:
+      type: object
+      required: [nombre]
+      example:
+        nombre: Conciertos
+        icono: music
+        color_hex: "#C9A84C"
+        categoria_padre_id: 6
+      properties:
+        nombre:
+          type: string
+        icono:
+          type: string
+        color_hex:
+          type: string
+          example: "#C9A84C"
+        categoria_padre_id:
+          type: integer
+          nullable: true
+    CategoryUpdateRequest:
+      type: object
+      description: All fields are optional.
+      example:
+        nombre: Conciertos y Eventos
+        icono: ticket
+        color_hex: "#F59E0B"
+        categoria_padre_id: 6
+      properties:
+        nombre:
+          type: string
+        icono:
+          type: string
+        color_hex:
+          type: string
+          example: "#C9A84C"
+        categoria_padre_id:
+          type: integer
+          nullable: true
+    WalletRequest:
+      type: object
+      required: [nombre, tipo, saldo]
+      example:
+        nombre: Tarjeta Gold BHD
+        tipo: gastos
+        saldo: 19000
+        moneda: DOP
+        color_hex: "#EF4444"
+        icono: creditCard
+      properties:
+        nombre:
+          type: string
+        tipo:
+          type: string
+          enum: [gastos, cuentas, deudas]
+        saldo:
+          type: number
+        moneda:
+          type: string
+          enum: [DOP, USD]
+        color_hex:
+          type: string
+        icono:
+          type: string
+    WalletUpdateRequest:
+      type: object
+      description: All fields are optional.
+      example:
+        tipo: cuentas
+        saldo: 25000
+      properties:
+        nombre:
+          type: string
+        tipo:
+          type: string
+          enum: [gastos, cuentas, deudas]
+        saldo:
+          type: number
+        moneda:
+          type: string
+          enum: [DOP, USD]
+        color_hex:
+          type: string
+        icono:
+          type: string
+    TransactionRequest:
+      type: object
+      required: [fecha, descripcion, monto, tipo, budgetId, catKey, walletId]
+      example:
+        fecha: "2026-03-09"
+        descripcion: "Compra supermercado"
+        monto: 4200
+        tipo: gasto
+        budgetId: 1
+        catKey: groceries
+        walletId: 3
+        moneda: DOP
+      properties:
+        fecha:
+          type: string
+          example: "2026-03-09"
+        descripcion:
+          type: string
+        monto:
+          type: number
+        tipo:
+          type: string
+          enum: [ingreso, gasto, transferencia]
+        budgetId:
+          type: integer
+          description: Presupuesto al que pertenece la transacción.
+        catKey:
+          type: string
+        walletId:
+          type: integer
+        toWalletId:
+          type: integer
+        nota:
+          type: string
+        moneda:
+          type: string
+          enum: [DOP, USD]
+    TransactionUpdateRequest:
+      type: object
+      description: All fields are optional.
+      example:
+        descripcion: "Compra hogar quincenal"
+        nota: "Supermercado compartido"
+        budgetId: 1
+      properties:
+        fecha:
+          type: string
+          example: "2026-03-09"
+        descripcion:
+          type: string
+        monto:
+          type: number
+        tipo:
+          type: string
+          enum: [ingreso, gasto, transferencia]
+        budgetId:
+          type: integer
+        catKey:
+          type: string
+        walletId:
+          type: integer
+        toWalletId:
+          type: integer
+          nullable: true
+        nota:
+          type: string
+          nullable: true
+        moneda:
+          type: string
+          enum: [DOP, USD]
+    BudgetRequest:
+      type: object
+      required: [nombre, periodo]
+      example:
+        nombre: Presupuesto Marzo Casa
+        periodo: mensual
+        dia_inicio: 1
+        ahorro_objetivo: 12000
+        ingresos_detalle:
+          - categoriaId: 101
+            monto: 85000
+          - categoriaId: 102
+            monto: 12000
+        categorias:
+          - categoriaId: 201
+            limite: 25000
+          - categoriaId: 202
+            limite: 18000
+        espacio_id: null
+      properties:
+        nombre:
+          type: string
+        periodo:
+          type: string
+          enum: [mensual, quincenal, semanal, unico]
+        dia_inicio:
+          type: integer
+          minimum: 1
+          maximum: 31
+        ingresos:
+          type: number
+        ahorro_objetivo:
+          type: number
+          description: Meta de ahorro para el período.
+        activo:
+          type: boolean
+        espacio_id:
+          type: integer
+          nullable: true
+        ingresos_detalle:
+          type: array
+          description: Fuentes de ingresos planeadas (categorías visibles del usuario o del sistema).
+          items:
+            type: object
+            properties:
+              categoriaId:
+                type: integer
+              monto:
+                type: number
+        categorias:
+          type: array
+          description: Límites de gasto por categoría.
+          items:
+            type: object
+            properties:
+              categoriaId:
+                type: integer
+              limite:
+                type: number
+    BudgetUpdateRequest:
+      type: object
+      description: All fields are optional.
+      example:
+        ahorro_objetivo: 15000
+        ingresos_detalle:
+          - categoriaId: 101
+            monto: 90000
+      properties:
+        nombre:
+          type: string
+        periodo:
+          type: string
+          enum: [mensual, quincenal, semanal, unico]
+        dia_inicio:
+          type: integer
+          minimum: 1
+          maximum: 31
+        ingresos:
+          type: number
+        ahorro_objetivo:
+          type: number
+        activo:
+          type: boolean
+        espacio_id:
+          type: integer
+          nullable: true
+        ingresos_detalle:
+          type: array
+          items:
+            type: object
+            properties:
+              categoriaId:
+                type: integer
+              monto:
+                type: number
+    RecurringRequest:
+      type: object
+      required: [tipo, monto, frecuencia, diaEjecucion]
+      properties:
+        walletId:
+          type: integer
+          nullable: true
+        catKey:
+          type: string
+          nullable: true
+        tipo:
+          type: string
+          enum: [ingreso, gasto, transferencia]
+        monto:
+          type: number
+        moneda:
+          type: string
+          enum: [DOP, USD]
+        descripcion:
+          type: string
+          nullable: true
+        nota:
+          type: string
+          nullable: true
+        frecuencia:
+          type: string
+          enum: [mensual, quincenal, semanal]
+        diaEjecucion:
+          type: integer
+          minimum: 1
+          maximum: 31
+        activo:
+          type: boolean
+    RecurringUpdateRequest:
+      type: object
+      description: All fields are optional.
+      properties:
+        walletId:
+          type: integer
+          nullable: true
+        catKey:
+          type: string
+          nullable: true
+        tipo:
+          type: string
+          enum: [ingreso, gasto, transferencia]
+        monto:
+          type: number
+        moneda:
+          type: string
+          enum: [DOP, USD]
+        descripcion:
+          type: string
+          nullable: true
+        nota:
+          type: string
+          nullable: true
+        frecuencia:
+          type: string
+          enum: [mensual, quincenal, semanal]
+        diaEjecucion:
+          type: integer
+          minimum: 1
+          maximum: 31
+        activo:
+          type: boolean
+    ProfileUpdateRequest:
+      type: object
+      description: All fields are optional.
+      properties:
+        nombre:
+          type: string
+        moneda_base:
+          type: string
+          enum: [DOP, USD]
+        meta_financiera:
+          type: string
+          nullable: true
+        meta_monto:
+          type: number
+          nullable: true
+        meta_fecha:
+          type: string
+          example: "2026-12-31"
+          nullable: true
+    SpaceRequest:
+      type: object
+      required: [nombre]
+      properties:
+        nombre:
+          type: string
+        descripcion:
+          type: string
+          nullable: true
+    InviteRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    AcceptInviteRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Created
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: OK
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: [Auth]
+      summary: Update profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdateRequest"
+      responses:
+        "200":
+          description: OK
+  /auth/password:
+    put:
+      tags: [Auth]
+      summary: Change password
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        "200":
+          description: OK
+
+  /categories:
+    get:
+      tags: [Categories]
+      summary: List categories (grouped by parent by default)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: formato
+          schema:
+            type: string
+            enum: [grouped, flat]
+            default: grouped
+          description: grouped returns parent+children, flat returns raw rows.
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: [Categories]
+      summary: Create category
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryRequest"
+      responses:
+        "201":
+          description: Created
+  /categories/system:
+    get:
+      tags: [Categories]
+      summary: List system categories
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+  /categories/{id}:
+    put:
+      tags: [Categories]
+      summary: Update category
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryUpdateRequest"
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: [Categories]
+      summary: Delete category
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+
+  /wallets:
+    get:
+      tags: [Wallets]
+      summary: List wallets
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Wallets]
+      summary: Create wallet
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletRequest"
+      responses:
+        "201": { description: Created }
+  /wallets/summary:
+    get:
+      tags: [Wallets]
+      summary: Wallet summary
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+  /wallets/{id}:
+    get:
+      tags: [Wallets]
+      summary: Get wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+    put:
+      tags: [Wallets]
+      summary: Update wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletUpdateRequest"
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Wallets]
+      summary: Delete wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /wallets/{id}/transactions:
+    get:
+      tags: [Wallets]
+      summary: Wallet transactions
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        "200": { description: OK }
+
+  /transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: limit
+          schema: { type: integer }
+        - in: query
+          name: budgetId
+          schema: { type: integer }
+        - in: query
+          name: tipo
+          schema: { type: string, enum: [ingreso, gasto, transferencia] }
+        - in: query
+          name: catKey
+          schema: { type: string }
+        - in: query
+          name: desde
+          schema: { type: string }
+        - in: query
+          name: hasta
+          schema: { type: string }
+        - in: query
+          name: walletId
+          schema: { type: integer }
+        - in: query
+          name: search
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Transactions]
+      summary: Create transaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionRequest"
+      responses:
+        "201": { description: Created }
+  /transactions/{id}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+    put:
+      tags: [Transactions]
+      summary: Update transaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionUpdateRequest"
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Transactions]
+      summary: Delete transaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+
+  /budgets:
+    get:
+      tags: [Budgets]
+      summary: List budgets
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Budgets]
+      summary: Create budget
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BudgetRequest"
+      responses:
+        "201": { description: Created }
+  /budgets/{id}:
+    get:
+      tags: [Budgets]
+      summary: Get budget
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+    put:
+      tags: [Budgets]
+      summary: Update budget
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BudgetUpdateRequest"
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Budgets]
+      summary: Delete budget
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /budgets/{id}/activate:
+    patch:
+      tags: [Budgets]
+      summary: Activate budget
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /budgets/{id}/spending:
+    get:
+      tags: [Budgets]
+      summary: Budget spending by category
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /budgets/{id}/categories:
+    post:
+      tags: [Budgets]
+      summary: Add category limit to budget
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [categoriaId, limite]
+              properties:
+                categoriaId:
+                  type: integer
+                limite:
+                  type: number
+      responses:
+        "201": { description: Created }
+  /budgets/{id}/categories/{catId}:
+    put:
+      tags: [Budgets]
+      summary: Update category limit
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: catId
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [limite]
+              properties:
+                limite:
+                  type: number
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Budgets]
+      summary: Remove category limit
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: catId
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+
+  /recurring:
+    get:
+      tags: [Recurring]
+      summary: List recurring transactions
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Recurring]
+      summary: Create recurring transaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringRequest"
+      responses:
+        "201": { description: Created }
+  /recurring/{id}:
+    put:
+      tags: [Recurring]
+      summary: Update recurring transaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringUpdateRequest"
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Recurring]
+      summary: Delete recurring transaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /recurring/{id}/toggle:
+    patch:
+      tags: [Recurring]
+      summary: Toggle recurring active status
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /recurring/process:
+    post:
+      tags: [Recurring]
+      summary: Process due recurring transactions
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Dashboard aggregate data
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+
+  /insights:
+    get:
+      tags: [Insights]
+      summary: Insights aggregate data
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: periodo
+          schema:
+            type: string
+            enum: [mensual, quincenal, semanal]
+            default: mensual
+        - in: query
+          name: presupuestoId
+          schema:
+            type: integer
+      responses:
+        "200": { description: OK }
+
+  /spaces:
+    get:
+      tags: [Spaces]
+      summary: List spaces
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Spaces]
+      summary: Create space
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpaceRequest"
+      responses:
+        "201": { description: Created }
+  /spaces/{id}:
+    get:
+      tags: [Spaces]
+      summary: Get space
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Spaces]
+      summary: Delete space (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /spaces/{id}/invite:
+    post:
+      tags: [Spaces]
+      summary: Invite member by email
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteRequest"
+      responses:
+        "201": { description: Created }
+  /spaces/{id}/members:
+    get:
+      tags: [Spaces]
+      summary: List members
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /spaces/{id}/members/{userId}:
+    patch:
+      tags: [Spaces]
+      summary: Update member role
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rol]
+              properties:
+                rol:
+                  type: string
+                  enum: [admin, miembro]
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Spaces]
+      summary: Remove member
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /spaces/{id}/invitations:
+    get:
+      tags: [Spaces]
+      summary: List pending invitations
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /spaces/{id}/invitations/{invId}:
+    delete:
+      tags: [Spaces]
+      summary: Cancel invitation
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: invId
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+
+  /invitations/{token}/accept:
+    post:
+      tags: [Invitations]
+      summary: Accept invitation (public)
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInviteRequest"
+      responses:
+        "200": { description: OK }

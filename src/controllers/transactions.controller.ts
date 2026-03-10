@@ -28,6 +28,7 @@ export async function listTransactions(
     const filters: TransactionFilters = {
       page: req.query.page ? parsePositiveInt(req.query.page, 'page') : 1,
       limit: req.query.limit ? parsePositiveInt(req.query.limit, 'limit') : 20,
+      budgetId: req.query.budgetId ? parsePositiveInt(req.query.budgetId, 'budgetId') : undefined,
       tipo: req.query.tipo as any,
       catKey: req.query.catKey ? String(req.query.catKey) : undefined,
       desde: req.query.desde ? String(req.query.desde) : undefined,
@@ -92,4 +93,3 @@ export async function deleteTransaction(
     next(error);
   }
 }
-

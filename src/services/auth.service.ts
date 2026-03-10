@@ -71,6 +71,21 @@ export class AuthService {
       throw new BadRequestError('DB_ERROR', 'No se pudo crear la suscripción inicial.');
     }
 
+    const { error: errorBudget } = await supabase.from('presupuestos').insert({
+      usuario_id: usuario.usuario_id,
+      nombre: 'Predeterminado',
+      periodo: 'mensual',
+      dia_inicio: 1,
+      ingresos: 0,
+      ahorro_objetivo: 0,
+      activo: true,
+      espacio_id: null,
+    });
+
+    if (errorBudget) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo crear el presupuesto predeterminado.');
+    }
+
     const userId = Number(usuario.usuario_id);
     return {
       usuario: this.mapUsuarioPublico(usuario),

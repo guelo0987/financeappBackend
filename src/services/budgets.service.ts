@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { getSupabaseClient } from '../config/supabase';
 import { BadRequestError, NotFoundError } from '../utils/errors';
-import { BudgetCategoryInput, CreateBudgetDTO, UpdateBudgetDTO } from '../types/budgets.types';
+import {
+  BudgetCategoryInput,
+  BudgetIncomeInput,
+  CreateBudgetDTO,
+  UpdateBudgetDTO,
+} from '../types/budgets.types';
 
 const supabase: any = getSupabaseClient();
 
@@ -10,6 +15,7 @@ const createBudgetSchema = z.object({
   periodo: z.enum(['mensual', 'quincenal', 'semanal', 'unico']),
   dia_inicio: z.number().int().min(1).max(31).optional(),
   ingresos: z.number().min(0).optional(),
+  ahorro_objetivo: z.number().min(0).optional(),
   activo: z.boolean().optional(),
   espacio_id: z.number().int().positive().nullable().optional(),
   categorias: z
@@ -20,6 +26,14 @@ const createBudgetSchema = z.object({
       }),
     )
     .optional(),
+  ingresos_detalle: z
+    .array(
+      z.object({
+        categoriaId: z.number().int().positive(),
+        monto: z.number().positive(),
+      }),
+    )
+    .optional(),
 });
 
 const updateBudgetSchema = z.object({
@@ -27,31 +41,59 @@ const updateBudgetSchema = z.object({
   periodo: z.enum(['mensual', 'quincenal', 'semanal', 'unico']).optional(),
   dia_inicio: z.number().int().min(1).max(31).optional(),
   ingresos: z.number().min(0).optional(),
+  ahorro_objetivo: z.number().min(0).optional(),
   activo: z.boolean().optional(),
   espacio_id: z.number().int().positive().nullable().optional(),
+  ingresos_detalle: z
+    .array(
+      z.object({
+        categoriaId: z.number().int().positive(),
+        monto: z.number().positive(),
+      }),
+    )
+    .optional(),
 });
 
 export class BudgetsService {
   async getAll(userId: number) {
-    const { data, error } = await supabase
-      .from('presupuestos')
-      .select('presupuesto_id, usuario_id, espacio_id, nombre, periodo, dia_inicio, ingresos, activo, creado_en, actualizado_en')
-      .eq('usuario_id', userId)
+    const spaceIds = await this.getMembershipSpaceIds(userId);
+    const selectFields =
+      'presupuesto_id, usuario_id, espacio_id, nombre, periodo, dia_inicio, ingresos, ahorro_objetivo, activo, creado_en, actualizado_en';
+
+    let query = supabase.from('presupuestos').select(selectFields);
+    if (spaceIds.length > 0) {
+      query = query.or(`usuario_id.eq.${userId},espacio_id.in.(${spaceIds.join(',')})`);
+    } else {
+      query = query.eq('usuario_id', userId);
+    }
+
+    const { data, error } = await query
       .order('activo', { ascending: false })
       .order('creado_en', { ascending: false });
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar los presupuestos.');
 
-    return data ?? [];
+    const map = new Map<number, any>();
+    for (const row of data ?? []) map.set(Number(row.presupuesto_id), row);
+    return Array.from(map.values());
   }
 
   async getById(userId: number, budgetId: number) {
-    const budget = await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
     const categories = await this.getBudgetCategories(budgetId);
-    const spending = await this.getSpendingForRange(userId, categories, this.computeDateRange(budget));
+    const spending = await this.getSpendingForRange(userId, budget, categories, this.computeDateRange(budget));
+    const ingresosDetalle = await this.getBudgetIncomePlan(userId, budget);
+    const ingresosActuales = await this.getIncomeForRange(
+      userId,
+      budget,
+      ingresosDetalle,
+      this.computeDateRange(budget),
+    );
 
     return {
       ...this.mapBudget(budget),
+      ingresos_detalle: ingresosDetalle,
+      ingresos_actuales: ingresosActuales,
       categorias: spending,
     };
   }
@@ -60,10 +102,23 @@ export class BudgetsService {
     const parsed = createBudgetSchema.safeParse(dto);
     if (!parsed.success) throw new BadRequestError('VALIDACION_ERROR', parsed.error.message);
     const payload = parsed.data;
+    if (payload.espacio_id) {
+      await this.assertSpaceMembership(userId, payload.espacio_id);
+    }
 
     if (payload.activo !== false) {
       await this.deactivateAll(userId);
     }
+
+    if (payload.ingresos_detalle?.length) {
+      for (const item of payload.ingresos_detalle) {
+        await this.ensureCategoryVisible(userId, item.categoriaId);
+      }
+    }
+
+    const plannedIncomeTotal = payload.ingresos_detalle?.length
+      ? payload.ingresos_detalle.reduce((sum, item) => sum + item.monto, 0)
+      : payload.ingresos ?? 0;
 
     const { data, error } = await supabase
       .from('presupuestos')
@@ -72,17 +127,23 @@ export class BudgetsService {
         nombre: payload.nombre.trim(),
         periodo: payload.periodo,
         dia_inicio: payload.dia_inicio ?? 1,
-        ingresos: payload.ingresos ?? 0,
+        ingresos: plannedIncomeTotal,
+        ahorro_objetivo: payload.ahorro_objetivo ?? 0,
         activo: payload.activo ?? true,
         espacio_id: payload.espacio_id ?? null,
       })
-      .select('presupuesto_id, usuario_id, espacio_id, nombre, periodo, dia_inicio, ingresos, activo, creado_en, actualizado_en')
+      .select(
+        'presupuesto_id, usuario_id, espacio_id, nombre, periodo, dia_inicio, ingresos, ahorro_objetivo, activo, creado_en, actualizado_en',
+      )
       .single();
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo crear el presupuesto.');
 
     if (payload.categorias?.length) {
       await this.replaceCategories(userId, Number(data.presupuesto_id), payload.categorias);
+    }
+    if (payload.ingresos_detalle?.length) {
+      await this.replaceIncomeDetails(userId, Number(data.presupuesto_id), payload.ingresos_detalle);
     }
 
     return this.getById(userId, Number(data.presupuesto_id));
@@ -93,7 +154,17 @@ export class BudgetsService {
     if (!parsed.success) throw new BadRequestError('VALIDACION_ERROR', parsed.error.message);
     const payload = parsed.data;
 
-    await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
+
+    if (payload.espacio_id) {
+      await this.assertSpaceMembership(userId, payload.espacio_id);
+    }
+    if (payload.ingresos_detalle?.length) {
+      for (const item of payload.ingresos_detalle) {
+        await this.ensureCategoryVisible(userId, item.categoriaId);
+      }
+    }
 
     if (payload.activo === true) {
       await this.deactivateAll(userId);
@@ -104,53 +175,63 @@ export class BudgetsService {
     if (payload.periodo !== undefined) updateData.periodo = payload.periodo;
     if (payload.dia_inicio !== undefined) updateData.dia_inicio = payload.dia_inicio;
     if (payload.ingresos !== undefined) updateData.ingresos = payload.ingresos;
+    if (payload.ahorro_objetivo !== undefined) updateData.ahorro_objetivo = payload.ahorro_objetivo;
     if (payload.activo !== undefined) updateData.activo = payload.activo;
     if (payload.espacio_id !== undefined) updateData.espacio_id = payload.espacio_id;
     updateData.actualizado_en = new Date().toISOString();
 
+    if (payload.ingresos_detalle !== undefined) {
+      const sum = payload.ingresos_detalle.reduce((acc, item) => acc + item.monto, 0);
+      updateData.ingresos = sum;
+    }
+
     const { error } = await supabase
       .from('presupuestos')
       .update(updateData)
-      .eq('presupuesto_id', budgetId)
-      .eq('usuario_id', userId);
+      .eq('presupuesto_id', budgetId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el presupuesto.');
+
+    if (payload.ingresos_detalle !== undefined) {
+      await this.replaceIncomeDetails(userId, budgetId, payload.ingresos_detalle);
+    }
 
     return this.getById(userId, budgetId);
   }
 
   async delete(userId: number, budgetId: number): Promise<void> {
-    await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
     const { error } = await supabase
       .from('presupuestos')
       .delete()
-      .eq('presupuesto_id', budgetId)
-      .eq('usuario_id', userId);
+      .eq('presupuesto_id', budgetId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo eliminar el presupuesto.');
   }
 
   async setActive(userId: number, budgetId: number): Promise<void> {
-    await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
     await this.deactivateAll(userId);
 
     const { error } = await supabase
       .from('presupuestos')
       .update({ activo: true, actualizado_en: new Date().toISOString() })
-      .eq('presupuesto_id', budgetId)
-      .eq('usuario_id', userId);
+      .eq('presupuesto_id', budgetId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo activar el presupuesto.');
   }
 
   async getSpending(userId: number, budgetId: number) {
-    const budget = await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
     const categories = await this.getBudgetCategories(budgetId);
-    return this.getSpendingForRange(userId, categories, this.computeDateRange(budget));
+    return this.getSpendingForRange(userId, budget, categories, this.computeDateRange(budget));
   }
 
   async addCategoryLimit(userId: number, budgetId: number, categoriaId: number, limite: number) {
-    await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
     await this.ensureCategoryVisible(userId, categoriaId);
     if (limite <= 0) throw new BadRequestError('VALIDACION_ERROR', 'El límite debe ser mayor que 0.');
 
@@ -163,7 +244,8 @@ export class BudgetsService {
   }
 
   async updateCategoryLimit(userId: number, budgetId: number, categoriaId: number, limite: number) {
-    await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
     if (limite <= 0) throw new BadRequestError('VALIDACION_ERROR', 'El límite debe ser mayor que 0.');
 
     const { error } = await supabase
@@ -176,7 +258,8 @@ export class BudgetsService {
   }
 
   async removeCategoryLimit(userId: number, budgetId: number, categoriaId: number) {
-    await this.getOwnedBudget(userId, budgetId);
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
     const { error } = await supabase
       .from('presupuesto_categorias')
       .delete()
@@ -217,23 +300,29 @@ export class BudgetsService {
     }
   }
 
-  private async getOwnedBudget(userId: number, budgetId: number) {
+  private async getAccessibleBudget(userId: number, budgetId: number) {
     const { data, error } = await supabase
       .from('presupuestos')
-      .select('presupuesto_id, usuario_id, espacio_id, nombre, periodo, dia_inicio, ingresos, activo, creado_en, actualizado_en')
+      .select(
+        'presupuesto_id, usuario_id, espacio_id, nombre, periodo, dia_inicio, ingresos, ahorro_objetivo, activo, creado_en, actualizado_en',
+      )
       .eq('presupuesto_id', budgetId)
-      .eq('usuario_id', userId)
       .maybeSingle();
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo validar el presupuesto.');
     if (!data) throw new NotFoundError('NOT_FOUND', 'Presupuesto no encontrado.');
-    return data;
+    if (Number(data.usuario_id) === userId) return data;
+    if (data.espacio_id) {
+      await this.assertSpaceMembership(userId, Number(data.espacio_id));
+      return data;
+    }
+    throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No tiene acceso al presupuesto indicado.');
   }
 
   private async getBudgetCategories(budgetId: number) {
     const { data, error } = await supabase
       .from('presupuesto_categorias')
-      .select('categoria_id, limite, categorias(categoria_id, slug, nombre, icono, color_hex, tipo)')
+      .select('categoria_id, limite, categorias(categoria_id, slug, nombre, icono, color_hex)')
       .eq('presupuesto_id', budgetId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar las categorías del presupuesto.');
@@ -249,7 +338,7 @@ export class BudgetsService {
       .maybeSingle();
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo validar categoría.');
-    if (!data) throw new NotFoundError('NOT_FOUND', 'Categoría no encontrada.');
+    if (!data) throw new NotFoundError('NOT_FOUND', 'Categoría no encontrada o no pertenece al usuario.');
   }
 
   private async deactivateAll(userId: number) {
@@ -292,18 +381,31 @@ export class BudgetsService {
     return { desde: this.isoDate(created), hasta: this.isoDate(now) };
   }
 
-  private async getSpendingForRange(userId: number, categories: any[], range: { desde: string; hasta: string }) {
+  private async getSpendingForRange(
+    userId: number,
+    budget: any,
+    categories: any[],
+    range: { desde: string; hasta: string },
+  ) {
     const categoryIds = categories.map((c) => c.categoria_id);
     if (!categoryIds.length) return [];
 
-    const { data, error } = await supabase
+    let txQuery = supabase
       .from('transacciones')
       .select('categoria_id, monto')
-      .eq('usuario_id', userId)
+      .eq('presupuesto_id', Number(budget.presupuesto_id))
       .eq('tipo', 'gasto')
       .gte('fecha', range.desde)
       .lte('fecha', range.hasta)
       .in('categoria_id', categoryIds);
+
+    if (budget.espacio_id) {
+      txQuery = txQuery.eq('espacio_id', Number(budget.espacio_id));
+    } else {
+      txQuery = txQuery.eq('usuario_id', userId).is('espacio_id', null);
+    }
+
+    const { data, error } = await txQuery;
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo calcular el gasto por categoría.');
 
@@ -324,13 +426,159 @@ export class BudgetsService {
         nombre: cat?.nombre ?? null,
         icono: cat?.icono ?? null,
         color_hex: cat?.color_hex ?? null,
-        tipo: cat?.tipo ?? null,
         limite,
         gastado,
         restante: Math.max(0, limite - gastado),
         porcentajeUsado: limite > 0 ? (gastado / limite) * 100 : 0,
       };
     });
+  }
+
+  private async replaceIncomeDetails(
+    userId: number,
+    budgetId: number,
+    ingresosDetalle: BudgetIncomeInput[],
+  ) {
+    const dedup = new Map<number, number>();
+    for (const item of ingresosDetalle) {
+      if (item.monto <= 0) {
+        throw new BadRequestError('VALIDACION_ERROR', 'Todos los montos de ingresos deben ser mayores que 0.');
+      }
+      dedup.set(item.categoriaId, item.monto);
+    }
+
+    for (const categoriaId of dedup.keys()) {
+      await this.ensureCategoryVisible(userId, categoriaId);
+    }
+
+    const rows = Array.from(dedup.entries()).map(([categoriaId, monto_planeado]) => ({
+      presupuesto_id: budgetId,
+      categoria_id: categoriaId,
+      monto_planeado,
+    }));
+
+    const { error: deleteError } = await supabase
+      .from('presupuesto_ingresos')
+      .delete()
+      .eq('presupuesto_id', budgetId);
+    if (deleteError) {
+      throw new BadRequestError(
+        'DB_ERROR',
+        'No se pudieron actualizar las fuentes de ingreso del presupuesto.',
+      );
+    }
+
+    if (rows.length > 0) {
+      const { error: insertError } = await supabase.from('presupuesto_ingresos').insert(rows);
+      if (insertError) {
+        throw new BadRequestError(
+          'DB_ERROR',
+          'No se pudieron guardar las fuentes de ingreso del presupuesto.',
+        );
+      }
+    }
+  }
+
+  private async getBudgetIncomePlan(userId: number, budget: any) {
+    const budgetId = Number(budget.presupuesto_id);
+    const { data, error } = await supabase
+      .from('presupuesto_ingresos')
+      .select('categoria_id, monto_planeado, categorias(categoria_id, slug, nombre, icono, color_hex)')
+      .eq('presupuesto_id', budgetId);
+
+    if (error) {
+      throw new BadRequestError(
+        'DB_ERROR',
+        'No se pudieron cargar las fuentes de ingreso del presupuesto.',
+      );
+    }
+
+    if ((data ?? []).length > 0) {
+      return (data ?? []).map((row: any) => {
+        const cat = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
+        return {
+          categoriaId: Number(row.categoria_id),
+          slug: cat?.slug ?? null,
+          nombre: cat?.nombre ?? null,
+          icono: cat?.icono ?? null,
+          color_hex: cat?.color_hex ?? null,
+          monto_planeado: Number(row.monto_planeado),
+        };
+      });
+    }
+
+    if (Number(budget.ingresos) > 0) {
+      return [
+        {
+          categoriaId: null,
+          slug: null,
+          nombre: 'Ingresos generales',
+          icono: null,
+          color_hex: null,
+          monto_planeado: Number(budget.ingresos),
+        },
+      ];
+    }
+
+    return [];
+  }
+
+  private async getIncomeForRange(
+    userId: number,
+    budget: any,
+    incomePlan: Array<{ categoriaId: number | null; monto_planeado: number }>,
+    range: { desde: string; hasta: string },
+  ) {
+    const categoryIds = incomePlan
+      .map((item) => item.categoriaId)
+      .filter((value): value is number => typeof value === 'number');
+
+    let txQuery = supabase
+      .from('transacciones')
+      .select('categoria_id, monto')
+      .eq('presupuesto_id', Number(budget.presupuesto_id))
+      .eq('tipo', 'ingreso')
+      .gte('fecha', range.desde)
+      .lte('fecha', range.hasta);
+
+    if (budget.espacio_id) {
+      txQuery = txQuery.eq('espacio_id', Number(budget.espacio_id));
+    } else {
+      txQuery = txQuery.eq('usuario_id', userId).is('espacio_id', null);
+    }
+
+    if (categoryIds.length > 0) {
+      txQuery = txQuery.in('categoria_id', categoryIds);
+    }
+
+    const { data, error } = await txQuery;
+    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo calcular ingresos del presupuesto.');
+
+    const actualMap = new Map<number, number>();
+    let totalActual = 0;
+    for (const row of data ?? []) {
+      const amount = Number(row.monto);
+      totalActual += amount;
+      if (row.categoria_id) {
+        const key = Number(row.categoria_id);
+        actualMap.set(key, (actualMap.get(key) ?? 0) + amount);
+      }
+    }
+
+    const detalle = incomePlan.map((item) => {
+      const actual = item.categoriaId ? actualMap.get(item.categoriaId) ?? 0 : totalActual;
+      return {
+        ...item,
+        monto_actual: actual,
+        diferencia: actual - item.monto_planeado,
+      };
+    });
+
+    return {
+      total_planeado: incomePlan.reduce((acc, item) => acc + item.monto_planeado, 0),
+      total_actual: totalActual,
+      detalle,
+    };
   }
 
   private mapBudget(row: any) {
@@ -340,6 +588,7 @@ export class BudgetsService {
       periodo: row.periodo,
       dia_inicio: Number(row.dia_inicio),
       ingresos: Number(row.ingresos),
+      ahorro_objetivo: Number(row.ahorro_objetivo ?? 0),
       activo: !!row.activo,
       espacio_id: row.espacio_id ? Number(row.espacio_id) : null,
       creado_en: row.creado_en,
@@ -350,5 +599,50 @@ export class BudgetsService {
   private isoDate(date: Date): string {
     return date.toISOString().slice(0, 10);
   }
-}
 
+  private async getMembershipSpaceIds(userId: number): Promise<number[]> {
+    const { data, error } = await supabase
+      .from('espacio_miembros')
+      .select('espacio_id')
+      .eq('usuario_id', userId);
+
+    if (error) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar membresías de espacios.');
+    }
+
+    return (data ?? []).map((row: any) => Number(row.espacio_id));
+  }
+
+  private async assertSpaceMembership(userId: number, spaceId: number): Promise<string> {
+    const { data, error } = await supabase
+      .from('espacio_miembros')
+      .select('rol')
+      .eq('espacio_id', spaceId)
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar membresía del espacio.');
+    }
+    if (!data) {
+      throw new NotFoundError(
+        'NOT_FOUND_OR_FORBIDDEN',
+        'No tiene acceso al espacio compartido indicado.',
+      );
+    }
+
+    return String(data.rol ?? 'miembro');
+  }
+
+  private async assertBudgetManageAccess(userId: number, budget: any): Promise<void> {
+    if (Number(budget.usuario_id) === userId) return;
+    if (!budget.espacio_id) {
+      throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No puede modificar este presupuesto.');
+    }
+
+    const role = await this.assertSpaceMembership(userId, Number(budget.espacio_id));
+    if (role !== 'admin') {
+      throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'Solo admins pueden modificar este presupuesto compartido.');
+    }
+  }
+}

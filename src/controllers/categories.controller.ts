@@ -13,7 +13,11 @@ function getUserId(req: Request): number {
 
 export async function getCategories(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const data = await categoriesService.getAllForUser(getUserId(req));
+    const formato = String(req.query.formato ?? 'grouped').toLowerCase();
+    const data =
+      formato === 'flat'
+        ? await categoriesService.getAllForUser(getUserId(req))
+        : await categoriesService.getGroupedForUser(getUserId(req));
     res.json({ data });
   } catch (error) {
     next(error);
@@ -61,4 +65,3 @@ export async function deleteCategory(req: Request, res: Response, next: NextFunc
     next(error);
   }
 }
-
