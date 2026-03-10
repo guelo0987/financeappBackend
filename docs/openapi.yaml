@@ -497,9 +497,9 @@ paths:
       responses:
         "200":
           description: OK
-    put:
+    patch:
       tags: [Auth]
-      summary: Update profile
+      summary: Partially update profile
       security:
         - bearerAuth: []
       requestBody:
