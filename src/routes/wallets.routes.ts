@@ -7,6 +7,7 @@ import {
   getWalletSummary,
   getWalletTransactions,
   getWallets,
+  setDefaultWallet,
   updateWallet,
 } from '../controllers/wallets.controller';
 
@@ -19,7 +20,7 @@ router.post('/', createWallet);
 router.get('/:id', getWalletById);
 router.put('/:id', updateWallet);
 router.delete('/:id', deleteWallet);
+router.patch('/:id/set-default', setDefaultWallet);
 router.get('/:id/transactions', getWalletTransactions);
 
 export default router;
-

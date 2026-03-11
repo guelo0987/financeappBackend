@@ -91,6 +91,16 @@ export async function getWalletTransactions(
   }
 }
 
+export async function setDefaultWallet(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const walletId = parseId(req.params.id, 'walletId');
+    const data = await walletsService.setDefault(requireUserId(req), walletId);
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getWalletSummary(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = await walletsService.getSummary(requireUserId(req));

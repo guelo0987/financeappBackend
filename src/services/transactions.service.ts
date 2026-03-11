@@ -531,7 +531,7 @@ export class TransactionsService {
 
       const { data: wallet, error: readError } = await supabase
         .from('activos')
-        .select('activo_id, valor_actual')
+        .select('activo_id, tipo, valor_actual')
         .eq('activo_id', walletId)
         .eq('usuario_id', userId)
         .maybeSingle();
@@ -546,7 +546,12 @@ export class TransactionsService {
         );
       }
 
-      const nextBalance = Number(wallet.valor_actual) + delta;
+      // Para wallets de deuda, valor_actual representa lo que se DEBE (siempre positivo).
+      // El flujo real es inverso: recibir dinero de una deuda AUMENTA lo que debes,
+      // y pagar una deuda REDUCE lo que debes. Por eso invertimos el delta.
+      const effectiveDelta = wallet.tipo === 'deudas' ? -delta : delta;
+      const nextBalance = Math.max(0, Number(wallet.valor_actual) + effectiveDelta);
+
       const { error: writeError } = await supabase
         .from('activos')
         .update({ valor_actual: nextBalance, actualizado_en: new Date().toISOString() })

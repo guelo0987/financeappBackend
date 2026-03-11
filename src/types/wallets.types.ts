@@ -8,6 +8,7 @@ export interface CreateWalletDTO {
   moneda?: Moneda;
   color_hex?: string;
   icono?: string;
+  incluir_en_patrimonio?: boolean;
 }
 
 export interface UpdateWalletDTO {
@@ -17,4 +18,5 @@ export interface UpdateWalletDTO {
   moneda?: Moneda;
   color_hex?: string;
   icono?: string;
+  incluir_en_patrimonio?: boolean;
 }

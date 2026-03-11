@@ -18,8 +18,10 @@ model usuarios {
   meta_financiera           String?
   meta_monto                Decimal?                    @db.Decimal(15, 2)
   meta_fecha                DateTime?                   @db.Date
+  activo_default_id         BigInt?
   creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
   actualizado_en            DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
+  activo_default            activos?                    @relation("wallet_default", fields: [activo_default_id], references: [activo_id], onDelete: SetNull, onUpdate: NoAction)
   activos                   activos[]
   alertas                   alertas[]
   categorias                categorias[]
@@ -66,8 +68,10 @@ model activos {
   espacio_id                BigInt?
   color_hex                 String                      @default("#4F46E5")
   icono                     String                      @default("landmark")
+  incluir_en_patrimonio     Boolean                     @default(true)
   espacio                   espacios_compartidos?       @relation(fields: [espacio_id], references: [espacio_id], onUpdate: NoAction)
   usuario                   usuarios                    @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
+  usuarios_default          usuarios[]                  @relation("wallet_default")
   transacciones_destino     transacciones[]             @relation("activo_destino")
   transacciones_origen      transacciones[]             @relation("activo_origen")
   transacciones_recurrentes transacciones_recurrentes[]

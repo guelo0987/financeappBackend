@@ -5,6 +5,9 @@ import { CreateWalletDTO, UpdateWalletDTO } from '../types/wallets.types';
 
 const supabase: any = getSupabaseClient();
 
+const WALLET_SELECT =
+  'activo_id, usuario_id, nombre, tipo, moneda, valor_actual, color_hex, icono, incluir_en_patrimonio, creado_en, actualizado_en';
+
 const createWalletSchema = z.object({
   nombre: z.string().min(1).max(120),
   tipo: z.enum(['gastos', 'cuentas', 'deudas']),
@@ -12,6 +15,7 @@ const createWalletSchema = z.object({
   moneda: z.enum(['DOP', 'USD']).optional(),
   color_hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   icono: z.string().min(1).max(80).optional(),
+  incluir_en_patrimonio: z.boolean().optional(),
 });
 
 const updateWalletSchema = z.object({
@@ -21,15 +25,16 @@ const updateWalletSchema = z.object({
   moneda: z.enum(['DOP', 'USD']).optional(),
   color_hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   icono: z.string().min(1).max(80).optional(),
+  incluir_en_patrimonio: z.boolean().optional(),
 });
 
 export class WalletsService {
   async getAll(userId: number) {
+    const defaultId = await this.getDefaultWalletId(userId);
+
     const { data, error } = await supabase
       .from('activos')
-      .select(
-        'activo_id, usuario_id, nombre, tipo, moneda, valor_actual, color_hex, icono, creado_en, actualizado_en',
-      )
+      .select(WALLET_SELECT)
       .eq('usuario_id', userId)
       .order('creado_en', { ascending: false });
 
@@ -37,12 +42,13 @@ export class WalletsService {
       throw new BadRequestError('DB_ERROR', 'No se pudieron cargar las cuentas.');
     }
 
-    return (data ?? []).map((item: any) => this.toWalletResponse(item));
+    return (data ?? []).map((item: any) => this.toWalletResponse(item, defaultId));
   }
 
   async getById(userId: number, walletId: number) {
     const wallet = await this.getOwnedWallet(userId, walletId);
-    return this.toWalletResponse(wallet);
+    const defaultId = await this.getDefaultWalletId(userId);
+    return this.toWalletResponse(wallet, defaultId);
   }
 
   async create(userId: number, dto: CreateWalletDTO) {
@@ -64,17 +70,24 @@ export class WalletsService {
         valor_actual: normalizedSaldo,
         color_hex: payload.color_hex ?? '#4F46E5',
         icono: payload.icono ?? 'landmark',
+        incluir_en_patrimonio: payload.incluir_en_patrimonio ?? true,
       })
-      .select(
-        'activo_id, usuario_id, nombre, tipo, moneda, valor_actual, color_hex, icono, creado_en, actualizado_en',
-      )
+      .select(WALLET_SELECT)
       .single();
 
     if (error) {
       throw new BadRequestError('DB_ERROR', 'No se pudo crear la cuenta.');
     }
 
-    return this.toWalletResponse(data);
+    // Auto-set as default if it's the user's first wallet
+    const walletId = Number(data.activo_id);
+    const currentDefault = await this.getDefaultWalletId(userId);
+    if (!currentDefault) {
+      await this.setDefaultWalletId(userId, walletId);
+      return this.toWalletResponse(data, walletId);
+    }
+
+    return this.toWalletResponse(data, currentDefault);
   }
 
   async update(userId: number, walletId: number, dto: UpdateWalletDTO) {
@@ -93,6 +106,7 @@ export class WalletsService {
     if (payload.moneda !== undefined) updateData.moneda = payload.moneda;
     if (payload.color_hex !== undefined) updateData.color_hex = payload.color_hex;
     if (payload.icono !== undefined) updateData.icono = payload.icono;
+    if (payload.incluir_en_patrimonio !== undefined) updateData.incluir_en_patrimonio = payload.incluir_en_patrimonio;
 
     if (Object.keys(updateData).length === 0) {
       return this.getById(userId, walletId);
@@ -105,9 +119,7 @@ export class WalletsService {
       .update(updateData)
       .eq('activo_id', walletId)
       .eq('usuario_id', userId)
-      .select(
-        'activo_id, usuario_id, nombre, tipo, moneda, valor_actual, color_hex, icono, creado_en, actualizado_en',
-      )
+      .select(WALLET_SELECT)
       .maybeSingle();
 
     if (error) {
@@ -118,7 +130,8 @@ export class WalletsService {
       throw new NotFoundError('NOT_FOUND', 'Cuenta no encontrada.');
     }
 
-    return this.toWalletResponse(data);
+    const defaultId = await this.getDefaultWalletId(userId);
+    return this.toWalletResponse(data, defaultId);
   }
 
   async softDelete(userId: number, walletId: number): Promise<void> {
@@ -133,6 +146,18 @@ export class WalletsService {
     if (error) {
       throw new BadRequestError('DB_ERROR', 'No se pudo eliminar la cuenta.');
     }
+
+    // If deleted wallet was default, clear it
+    const currentDefault = await this.getDefaultWalletId(userId);
+    if (currentDefault === walletId) {
+      await this.setDefaultWalletId(userId, null);
+    }
+  }
+
+  async setDefault(userId: number, walletId: number) {
+    await this.getOwnedWallet(userId, walletId);
+    await this.setDefaultWalletId(userId, walletId);
+    return { activo_default_id: walletId };
   }
 
   async getTransactions(userId: number, walletId: number, page: number, limit: number) {
@@ -179,12 +204,14 @@ export class WalletsService {
   async getSummary(userId: number) {
     const wallets = await this.getAll(userId);
 
-    const totalBalance = wallets
-      .filter((wallet: any) => wallet.tipo !== 'deudas')
-      .reduce((acc: number, wallet: any) => acc + wallet.saldo, 0);
-    const totalDebt = wallets
-      .filter((wallet: any) => wallet.tipo === 'deudas')
-      .reduce((acc: number, wallet: any) => acc + Math.abs(wallet.saldo), 0);
+    const patrimonio = wallets.filter((w: any) => w.incluir_en_patrimonio);
+
+    const totalBalance = patrimonio
+      .filter((w: any) => w.tipo !== 'deudas')
+      .reduce((acc: number, w: any) => acc + w.saldo, 0);
+    const totalDebt = patrimonio
+      .filter((w: any) => w.tipo === 'deudas')
+      .reduce((acc: number, w: any) => acc + Math.abs(w.saldo), 0);
 
     return {
       totalBalance,
@@ -197,9 +224,7 @@ export class WalletsService {
   private async getOwnedWallet(userId: number, walletId: number) {
     const { data, error } = await supabase
       .from('activos')
-      .select(
-        'activo_id, usuario_id, nombre, tipo, moneda, valor_actual, color_hex, icono, creado_en, actualizado_en',
-      )
+      .select(WALLET_SELECT)
       .eq('activo_id', walletId)
       .eq('usuario_id', userId)
       .maybeSingle();
@@ -214,7 +239,29 @@ export class WalletsService {
 
     return data;
   }
-  private toWalletResponse(row: any) {
+  private async getDefaultWalletId(userId: number): Promise<number | null> {
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('activo_default_id')
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data.activo_default_id ? Number(data.activo_default_id) : null;
+  }
+
+  private async setDefaultWalletId(userId: number, walletId: number | null): Promise<void> {
+    const { error } = await supabase
+      .from('usuarios')
+      .update({ activo_default_id: walletId })
+      .eq('usuario_id', userId);
+
+    if (error) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo actualizar la cuenta por defecto.');
+    }
+  }
+
+  private toWalletResponse(row: any, defaultWalletId?: number | null) {
     const saldo = row.tipo === 'deudas' ? -Number(row.valor_actual) : Number(row.valor_actual);
     return {
       id: Number(row.activo_id),
@@ -224,6 +271,8 @@ export class WalletsService {
       moneda: row.moneda,
       color_hex: row.color_hex,
       icono: row.icono,
+      es_default: Number(row.activo_id) === defaultWalletId,
+      incluir_en_patrimonio: row.incluir_en_patrimonio ?? true,
       creado_en: row.creado_en,
       actualizado_en: row.actualizado_en,
     };

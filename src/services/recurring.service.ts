@@ -72,7 +72,7 @@ export class RecurringService {
         frecuencia: payload.frecuencia,
         dia_ejecucion: payload.diaEjecucion,
         activo: payload.activo ?? true,
-        proxima_ejecucion: this.computeNextExecutionDate(payload.frecuencia, payload.diaEjecucion),
+        proxima_ejecucion: this.computeInitialExecutionDate(payload.frecuencia, payload.diaEjecucion),
       })
       .select(
         'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono)',
@@ -199,11 +199,12 @@ export class RecurringService {
           categoria_id: rec.categoria_id ?? null,
           descripcion: rec.descripcion ?? 'Transacción recurrente',
           fecha: today,
-          origen: 'api',
+          origen: 'recurrente',
           nota: rec.nota ?? null,
         });
 
         if (insertError) {
+          console.error(`[recurring] Insert error recurrente_id=${rec.recurrente_id}:`, insertError);
           errors += 1;
           continue;
         }
@@ -230,7 +231,8 @@ export class RecurringService {
         }
 
         processed += 1;
-      } catch {
+      } catch (err) {
+        console.error(`[recurring] Exception recurrente_id=${rec.recurrente_id}:`, err);
         errors += 1;
       }
     }
@@ -304,6 +306,51 @@ export class RecurringService {
 
     const weeklyDay = ((targetDay - 1) % 7) + 1;
     return dow === weeklyDay;
+  }
+
+  // Used on CREATE: returns the soonest occurrence including today.
+  // If the target day is today or still ahead this period → use current period.
+  // If it already passed → use next period.
+  private computeInitialExecutionDate(frecuencia: string, diaEjecucion: number): string {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const todayIso = this.isoDate(today);
+
+    if (frecuencia === 'semanal') {
+      const todayDow = this.isoWeekday(today);
+      const targetDow = ((diaEjecucion - 1) % 7) + 1;
+      let diff = targetDow - todayDow;
+      if (diff < 0) diff += 7;          // already passed this week → next week
+      const next = new Date(today);
+      next.setUTCDate(next.getUTCDate() + diff);
+      return this.isoDate(next);
+    }
+
+    if (frecuencia === 'quincenal') {
+      const day = today.getUTCDate();
+      const year = today.getUTCFullYear();
+      const month = today.getUTCMonth() + 1;
+      const last = this.daysInMonth(year, month);
+      const d1 = Math.min(diaEjecucion, last);
+      const d2 = Math.min(diaEjecucion + 15, last);
+      if (day <= d1) return this.isoDate(new Date(Date.UTC(year, month - 1, d1)));
+      if (day <= d2) return this.isoDate(new Date(Date.UTC(year, month - 1, d2)));
+      // Both passed this month → first occurrence next month
+      const nm = month === 12 ? 1 : month + 1;
+      const ny = month === 12 ? year + 1 : year;
+      return this.isoDate(new Date(Date.UTC(ny, nm - 1, Math.min(diaEjecucion, this.daysInMonth(ny, nm)))));
+    }
+
+    // mensual
+    const year = today.getUTCFullYear();
+    const month = today.getUTCMonth() + 1;
+    const last = this.daysInMonth(year, month);
+    const targetThisMonth = this.isoDate(new Date(Date.UTC(year, month - 1, Math.min(diaEjecucion, last))));
+    if (targetThisMonth >= todayIso) return targetThisMonth;
+    // Already passed → next month
+    const nm = month === 12 ? 1 : month + 1;
+    const ny = month === 12 ? year + 1 : year;
+    return this.isoDate(new Date(Date.UTC(ny, nm - 1, Math.min(diaEjecucion, this.daysInMonth(ny, nm)))));
   }
 
   private computeNextExecutionDate(frecuencia: string, diaEjecucion: number, baseIso?: string): string {
@@ -397,7 +444,7 @@ export class RecurringService {
   private async applyWalletAdjustment(userId: number, walletId: number, delta: number): Promise<void> {
     const { data: wallet, error: readError } = await supabase
       .from('activos')
-      .select('activo_id, valor_actual')
+      .select('activo_id, tipo, valor_actual')
       .eq('activo_id', walletId)
       .eq('usuario_id', userId)
       .maybeSingle();
@@ -409,7 +456,11 @@ export class RecurringService {
       throw new NotFoundError('NOT_FOUND', 'Cuenta no encontrada para aplicar recurrente.');
     }
 
-    const nextBalance = Number(wallet.valor_actual) + delta;
+    // Para wallets de deuda el delta se invierte: un ingreso reduce lo que debes,
+    // un gasto aumenta lo que debes.
+    const effectiveDelta = wallet.tipo === 'deudas' ? -delta : delta;
+    const nextBalance = Math.max(0, Number(wallet.valor_actual) + effectiveDelta);
+
     const { error: writeError } = await supabase
       .from('activos')
       .update({ valor_actual: nextBalance, actualizado_en: new Date().toISOString() })
