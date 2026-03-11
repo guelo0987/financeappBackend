@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getSupabaseClient } from '../config/supabase';
-import { BadRequestError, NotFoundError } from '../utils/errors';
+import { BadRequestError, ConflictError, NotFoundError } from '../utils/errors';
+import { EmailService } from './email.service';
 import {
   BudgetCategoryInput,
   BudgetIncomeInput,
@@ -9,6 +10,7 @@ import {
 } from '../types/budgets.types';
 
 const supabase: any = getSupabaseClient();
+const emailService = new EmailService();
 
 const createBudgetSchema = z.object({
   nombre: z.string().min(1).max(120),
@@ -17,7 +19,6 @@ const createBudgetSchema = z.object({
   ingresos: z.number().min(0).optional(),
   ahorro_objetivo: z.number().min(0).optional(),
   activo: z.boolean().optional(),
-  espacio_id: z.number().int().positive().nullable().optional(),
   categorias: z
     .array(
       z.object({
@@ -34,6 +35,10 @@ const createBudgetSchema = z.object({
       }),
     )
     .optional(),
+  invitados: z
+    .array(z.string().email())
+    .max(3, 'Un presupuesto puede tener máximo 3 colaboradores adicionales.')
+    .optional(),
 });
 
 const updateBudgetSchema = z.object({
@@ -43,7 +48,6 @@ const updateBudgetSchema = z.object({
   ingresos: z.number().min(0).optional(),
   ahorro_objetivo: z.number().min(0).optional(),
   activo: z.boolean().optional(),
-  espacio_id: z.number().int().positive().nullable().optional(),
   categorias: z
     .array(
       z.object({
@@ -89,20 +93,22 @@ export class BudgetsService {
   async getById(userId: number, budgetId: number) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
     const categories = await this.getBudgetCategories(budgetId);
-    const spending = await this.getSpendingForRange(userId, budget, categories, this.computeDateRange(budget));
+    const range = this.computeDateRange(budget);
+    const spending = await this.getSpendingForRange(userId, budget, categories, range);
+    const otrosGastos = await this.getUnplannedSpending(userId, budget, categories.map((c: any) => Number(c.categoria_id)), range);
     const ingresosDetalle = await this.getBudgetIncomePlan(userId, budget);
-    const ingresosActuales = await this.getIncomeForRange(
-      userId,
-      budget,
-      ingresosDetalle,
-      this.computeDateRange(budget),
-    );
+    const ingresosActuales = await this.getIncomeForRange(userId, budget, ingresosDetalle, range);
+
+    const totalGastadoPlan = spending.reduce((sum, c) => sum + c.gastado, 0);
+    const totalGastadoOtros = otrosGastos.reduce((sum, c) => sum + c.gastado, 0);
 
     return {
       ...this.mapBudget(budget),
       ingresos_detalle: ingresosDetalle,
       ingresos_actuales: ingresosActuales,
       categorias: spending,
+      otros_gastos: otrosGastos,
+      total_gastado_real: totalGastadoPlan + totalGastadoOtros,
     };
   }
 
@@ -110,9 +116,6 @@ export class BudgetsService {
     const parsed = createBudgetSchema.safeParse(dto);
     if (!parsed.success) throw new BadRequestError('VALIDACION_ERROR', parsed.error.message);
     const payload = parsed.data;
-    if (payload.espacio_id) {
-      await this.assertSpaceMembership(userId, payload.espacio_id);
-    }
 
     if (payload.activo !== false) {
       await this.deactivateAll(userId);
@@ -138,7 +141,6 @@ export class BudgetsService {
         ingresos: plannedIncomeTotal,
         ahorro_objetivo: payload.ahorro_objetivo ?? 0,
         activo: payload.activo ?? true,
-        espacio_id: payload.espacio_id ?? null,
       })
       .select(
         'presupuesto_id, usuario_id, espacio_id, nombre, periodo, dia_inicio, ingresos, ahorro_objetivo, activo, creado_en, actualizado_en',
@@ -147,14 +149,24 @@ export class BudgetsService {
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo crear el presupuesto.');
 
+    const budgetId = Number(data.presupuesto_id);
+
     if (payload.categorias?.length) {
-      await this.replaceCategories(userId, Number(data.presupuesto_id), payload.categorias);
+      await this.replaceCategories(userId, budgetId, payload.categorias);
     }
     if (payload.ingresos_detalle?.length) {
-      await this.replaceIncomeDetails(userId, Number(data.presupuesto_id), payload.ingresos_detalle);
+      await this.replaceIncomeDetails(userId, budgetId, payload.ingresos_detalle);
     }
 
-    return this.getById(userId, Number(data.presupuesto_id));
+    if (payload.invitados?.length) {
+      const espacioId = await this.ensureBudgetHasSpace(userId, budgetId, payload.nombre.trim());
+      const { data: inviter } = await supabase.from('usuarios').select('nombre').eq('usuario_id', userId).single();
+      for (const email of payload.invitados) {
+        await this.sendInvitation(userId, budgetId, espacioId, email, inviter?.nombre ?? 'Alguien', payload.nombre.trim());
+      }
+    }
+
+    return this.getById(userId, budgetId);
   }
 
   async update(userId: number, budgetId: number, dto: UpdateBudgetDTO) {
@@ -165,9 +177,6 @@ export class BudgetsService {
     const budget = await this.getAccessibleBudget(userId, budgetId);
     await this.assertBudgetManageAccess(userId, budget);
 
-    if (payload.espacio_id) {
-      await this.assertSpaceMembership(userId, payload.espacio_id);
-    }
     if (payload.categorias?.length) {
       for (const item of payload.categorias) {
         await this.ensureCategoryVisible(userId, item.categoriaId);
@@ -190,7 +199,6 @@ export class BudgetsService {
     if (payload.ingresos !== undefined) updateData.ingresos = payload.ingresos;
     if (payload.ahorro_objetivo !== undefined) updateData.ahorro_objetivo = payload.ahorro_objetivo;
     if (payload.activo !== undefined) updateData.activo = payload.activo;
-    if (payload.espacio_id !== undefined) updateData.espacio_id = payload.espacio_id;
     updateData.actualizado_en = new Date().toISOString();
 
     if (payload.ingresos_detalle !== undefined) {
@@ -242,7 +250,11 @@ export class BudgetsService {
   async getSpending(userId: number, budgetId: number) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
     const categories = await this.getBudgetCategories(budgetId);
-    return this.getSpendingForRange(userId, budget, categories, this.computeDateRange(budget));
+    const range = this.computeDateRange(budget);
+    const categorias = await this.getSpendingForRange(userId, budget, categories, range);
+    const otros_gastos = await this.getUnplannedSpending(userId, budget, categories.map((c: any) => Number(c.categoria_id)), range);
+    const total_gastado_real = categorias.reduce((sum, c) => sum + c.gastado, 0) + otros_gastos.reduce((sum, c) => sum + c.gastado, 0);
+    return { categorias, otros_gastos, total_gastado_real };
   }
 
   async addCategoryLimit(userId: number, budgetId: number, categoriaId: number, limite: number) {
@@ -283,6 +295,132 @@ export class BudgetsService {
       .eq('categoria_id', categoriaId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo eliminar el límite de categoría.');
+  }
+
+  private async sendInvitation(
+    userId: number,
+    budgetId: number,
+    espacioId: number,
+    email: string,
+    inviterName: string,
+    budgetNombre: string,
+  ) {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const { data: existingUser } = await supabase
+      .from('usuarios')
+      .select('usuario_id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (existingUser) {
+      const { data: alreadyMember } = await supabase
+        .from('espacio_miembros')
+        .select('usuario_id')
+        .eq('espacio_id', espacioId)
+        .eq('usuario_id', Number(existingUser.usuario_id))
+        .maybeSingle();
+      if (alreadyMember) {
+        throw new ConflictError('ALREADY_MEMBER', `El usuario ${normalizedEmail} ya es miembro del presupuesto.`);
+      }
+    }
+
+    const { data: existingInvite } = await supabase
+      .from('espacio_invitaciones')
+      .select('invitacion_id')
+      .eq('espacio_id', espacioId)
+      .eq('email_invitado', normalizedEmail)
+      .eq('estado', 'pendiente')
+      .gte('expira_en', new Date().toISOString())
+      .maybeSingle();
+
+    if (existingInvite) throw new ConflictError('INVITE_PENDING', `Ya existe una invitación pendiente para ${normalizedEmail}.`);
+
+    const { data: invite, error: inviteError } = await supabase
+      .from('espacio_invitaciones')
+      .insert({ espacio_id: espacioId, invitado_por: userId, email_invitado: normalizedEmail })
+      .select('token')
+      .single();
+
+    if (inviteError) throw new BadRequestError('DB_ERROR', `No se pudo crear la invitación para ${normalizedEmail}.`);
+
+    await emailService.sendBudgetInvitation(normalizedEmail, inviterName, budgetNombre, invite.token);
+  }
+
+  async listMembers(userId: number, budgetId: number) {
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+
+    if (!budget.espacio_id) return [];
+
+    const { data, error } = await supabase
+      .from('espacio_miembros')
+      .select('usuario_id, rol, unido_en, usuarios(usuario_id, nombre, email)')
+      .eq('espacio_id', Number(budget.espacio_id))
+      .order('unido_en', { ascending: true });
+
+    if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar los miembros.');
+
+    return (data ?? []).map((row: any) => {
+      const user = Array.isArray(row.usuarios) ? row.usuarios[0] : row.usuarios;
+      return {
+        usuario_id: Number(row.usuario_id),
+        rol: row.rol,
+        es_propietario: Number(row.usuario_id) === Number(budget.usuario_id),
+        unido_en: row.unido_en,
+        nombre: user?.nombre ?? null,
+        email: user?.email ?? null,
+      };
+    });
+  }
+
+  async removeMember(userId: number, budgetId: number, targetUserId: number) {
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
+
+    if (!budget.espacio_id) {
+      throw new NotFoundError('NOT_FOUND', 'Este presupuesto no tiene miembros compartidos.');
+    }
+
+    const espacioId = Number(budget.espacio_id);
+
+    if (targetUserId === Number(budget.usuario_id)) {
+      throw new BadRequestError('VALIDACION_ERROR', 'No puedes remover al propietario del presupuesto.');
+    }
+
+    const { data: member, error: memberError } = await supabase
+      .from('espacio_miembros')
+      .select('usuario_id')
+      .eq('espacio_id', espacioId)
+      .eq('usuario_id', targetUserId)
+      .maybeSingle();
+
+    if (memberError) throw new BadRequestError('DB_ERROR', 'No se pudo validar miembro.');
+    if (!member) throw new NotFoundError('NOT_FOUND', 'Miembro no encontrado en este presupuesto.');
+
+    const { error } = await supabase
+      .from('espacio_miembros')
+      .delete()
+      .eq('espacio_id', espacioId)
+      .eq('usuario_id', targetUserId);
+
+    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo remover el miembro.');
+  }
+
+  private async ensureBudgetHasSpace(userId: number, budgetId: number, budgetNombre: string): Promise<number> {
+    const { data: space, error: spaceError } = await supabase
+      .from('espacios_compartidos')
+      .insert({ nombre: budgetNombre, creado_por: userId })
+      .select('espacio_id')
+      .single();
+
+    if (spaceError) throw new BadRequestError('DB_ERROR', 'No se pudo inicializar el espacio compartido.');
+
+    const espacioId = Number(space.espacio_id);
+
+    await supabase.from('espacio_miembros').insert({ espacio_id: espacioId, usuario_id: userId, rol: 'admin' });
+    await supabase.from('presupuestos').update({ espacio_id: espacioId }).eq('presupuesto_id', budgetId);
+
+    return espacioId;
   }
 
   private async replaceCategories(userId: number, budgetId: number, categorias: BudgetCategoryInput[]) {
@@ -450,6 +588,56 @@ export class BudgetsService {
         porcentajeUsado: limite > 0 ? (gastado / limite) * 100 : 0,
       };
     });
+  }
+
+  private async getUnplannedSpending(
+    userId: number,
+    budget: any,
+    plannedCategoryIds: number[],
+    range: { desde: string; hasta: string },
+  ) {
+    let txQuery = supabase
+      .from('transacciones')
+      .select('categoria_id, monto, categorias(categoria_id, categoria_padre_id, slug, nombre, tipo, icono, color_hex)')
+      .eq('presupuesto_id', Number(budget.presupuesto_id))
+      .eq('tipo', 'gasto')
+      .gte('fecha', range.desde)
+      .lte('fecha', range.hasta);
+
+    if (plannedCategoryIds.length > 0) {
+      txQuery = txQuery.not('categoria_id', 'in', `(${plannedCategoryIds.join(',')})`);
+    }
+
+    if (budget.espacio_id) {
+      txQuery = txQuery.eq('espacio_id', Number(budget.espacio_id));
+    } else {
+      txQuery = txQuery.eq('usuario_id', userId).is('espacio_id', null);
+    }
+
+    const { data, error } = await txQuery;
+    if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar los gastos fuera del plan.');
+
+    const spentMap = new Map<number, { gastado: number; cat: any }>();
+    for (const row of data ?? []) {
+      const catId = Number(row.categoria_id);
+      const existing = spentMap.get(catId);
+      const cat = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
+      spentMap.set(catId, {
+        gastado: (existing?.gastado ?? 0) + Number(row.monto),
+        cat: existing?.cat ?? cat,
+      });
+    }
+
+    return Array.from(spentMap.entries()).map(([catId, { gastado, cat }]) => ({
+      categoriaId: catId,
+      categoria_padre_id: cat?.categoria_padre_id ? Number(cat.categoria_padre_id) : null,
+      slug: cat?.slug ?? null,
+      nombre: cat?.nombre ?? null,
+      tipo: cat?.tipo ?? null,
+      icono: cat?.icono ?? null,
+      color_hex: cat?.color_hex ?? null,
+      gastado,
+    }));
   }
 
   private async replaceIncomeDetails(

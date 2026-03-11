@@ -9,6 +9,8 @@ import {
   getBudgetById,
   getBudgets,
   getBudgetSpending,
+  listBudgetMembers,
+  removeBudgetMember,
   updateBudget,
   updateBudgetCategory,
 } from '../controllers/budgets.controller';
@@ -24,9 +26,10 @@ router.put('/:id', updateBudget);
 router.delete('/:id', deleteBudget);
 router.patch('/:id/activate', activateBudget);
 router.get('/:id/spending', getBudgetSpending);
+router.get('/:id/members', listBudgetMembers);
+router.delete('/:id/members/:userId', removeBudgetMember);
 router.post('/:id/categories', addBudgetCategory);
 router.put('/:id/categories/:catId', updateBudgetCategory);
 router.delete('/:id/categories/:catId', deleteBudgetCategory);
 
 export default router;
-

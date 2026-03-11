@@ -9,7 +9,6 @@ import dashboardRoutes from './routes/dashboard.routes';
 import insightsRoutes from './routes/insights.routes';
 import invitationsRoutes from './routes/invitations.routes';
 import recurringRoutes from './routes/recurring.routes';
-import spacesRoutes from './routes/spaces.routes';
 import transactionsRoutes from './routes/transactions.routes';
 import walletsRoutes from './routes/wallets.routes';
 import { corsMiddleware } from './middleware/cors.middleware';
@@ -34,7 +33,6 @@ app.use('/dashboard', dashboardRoutes);
 app.use('/insights', insightsRoutes);
 app.use('/invitations', invitationsRoutes);
 app.use('/recurring', recurringRoutes);
-app.use('/spaces', spacesRoutes);
 app.use('/wallets', walletsRoutes);
 app.use('/transactions', transactionsRoutes);
 

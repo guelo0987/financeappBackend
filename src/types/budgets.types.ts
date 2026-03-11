@@ -17,9 +17,9 @@ export interface CreateBudgetDTO {
   ingresos?: number;
   ahorro_objetivo?: number;
   activo?: boolean;
-  espacio_id?: number | null;
   categorias?: BudgetCategoryInput[];
   ingresos_detalle?: BudgetIncomeInput[];
+  invitados?: string[];
 }
 
 export interface UpdateBudgetDTO {
@@ -29,7 +29,6 @@ export interface UpdateBudgetDTO {
   ingresos?: number;
   ahorro_objetivo?: number;
   activo?: boolean;
-  espacio_id?: number | null;
   categorias?: BudgetCategoryInput[];
   ingresos_detalle?: BudgetIncomeInput[];
 }

@@ -122,6 +122,35 @@ export async function updateBudgetCategory(
   }
 }
 
+export async function listBudgetMembers(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const budgetId = parsePositiveInt(req.params.id, 'budgetId');
+    const data = await budgetsService.listMembers(requireUserId(req), budgetId);
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function removeBudgetMember(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const budgetId = parsePositiveInt(req.params.id, 'budgetId');
+    const targetUserId = parsePositiveInt(req.params.userId, 'userId');
+    await budgetsService.removeMember(requireUserId(req), budgetId, targetUserId);
+    res.json({ data: { eliminado: true } });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function deleteBudgetCategory(
   req: Request,
   res: Response,

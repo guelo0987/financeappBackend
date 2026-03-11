@@ -152,7 +152,7 @@ export class SpacesService {
       supabase.from('espacios_compartidos').select('nombre').eq('espacio_id', spaceId).single(),
     ]);
 
-    await emailService.sendSpaceInvitation(
+    await emailService.sendBudgetInvitation(
       normalizedEmail,
       user?.nombre || 'Alguien',
       space?.nombre || 'un espacio',
