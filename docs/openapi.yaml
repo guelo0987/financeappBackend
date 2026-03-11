@@ -68,13 +68,24 @@ components:
       required: [nombre]
       example:
         nombre: Conciertos
+        tipo: gasto
         icono: music
-        categoria_padre_id: 6
+        color_hex: "#F59E0B"
+        categoria_padre_id: 7
       properties:
         nombre:
           type: string
+        tipo:
+          type: string
+          enum: [ingreso, gasto, transferencia]
+          description: Se hereda del padre si se envía categoria_padre_id. Default gasto.
         icono:
           type: string
+          description: "Nombres de iconos permitidos: home, utensils, car, sparkles, pill, bookOpen, tv, trendingUp, arrowLeftRight, keySquare, zap, droplets, wifi, wrench, shield, coffee, package, shoppingCart, fuel, bus, plane, shirt, heart, creditCard, smile, dumbbell, stethoscope, monitorPlay, book, graduationCap, film, gamepad2, map, briefcase, laptop, barChart2, store, gift, circle"
+        color_hex:
+          type: string
+          pattern: "^#[0-9A-Fa-f]{6}$"
+          description: Se hereda del padre si se envía categoria_padre_id.
         categoria_padre_id:
           type: integer
           nullable: true
@@ -84,12 +95,19 @@ components:
       example:
         nombre: Conciertos y Eventos
         icono: ticket
-        categoria_padre_id: 6
+        color_hex: "#F59E0B"
+        categoria_padre_id: 7
       properties:
         nombre:
           type: string
+        tipo:
+          type: string
+          enum: [ingreso, gasto, transferencia]
         icono:
           type: string
+        color_hex:
+          type: string
+          pattern: "^#[0-9A-Fa-f]{6}$"
         categoria_padre_id:
           type: integer
           nullable: true
@@ -270,9 +288,14 @@ components:
                 type: number
     BudgetUpdateRequest:
       type: object
-      description: All fields are optional.
+      description: All fields are optional. Crear y editar tienen simetría completa.
       example:
         ahorro_objetivo: 15000
+        categorias:
+          - categoriaId: 201
+            limite: 28000
+          - categoriaId: 202
+            limite: 20000
         ingresos_detalle:
           - categoriaId: 101
             monto: 90000
@@ -295,6 +318,16 @@ components:
         espacio_id:
           type: integer
           nullable: true
+        categorias:
+          type: array
+          description: Reemplaza todos los límites de gasto por categoría del presupuesto.
+          items:
+            type: object
+            properties:
+              categoriaId:
+                type: integer
+              limite:
+                type: number
         ingresos_detalle:
           type: array
           items:
@@ -547,12 +580,18 @@ paths:
             enum: [grouped, flat]
             default: grouped
           description: grouped returns parent+children, flat returns raw rows.
+        - in: query
+          name: tipo
+          schema:
+            type: string
+            enum: [ingreso, gasto, transferencia]
+          description: Filter categories by type.
       responses:
         "200":
           description: OK
     post:
       tags: [Categories]
-      summary: Create category
+      summary: Create category (child or standalone)
       security:
         - bearerAuth: []
       requestBody:
@@ -564,12 +603,66 @@ paths:
       responses:
         "201":
           description: Created
+  /categories/parents:
+    get:
+      tags: [Categories]
+      summary: List parent categories only (categoria_padre_id is null)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: tipo
+          schema:
+            type: string
+            enum: [ingreso, gasto, transferencia]
+          description: Filter parent categories by type.
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: [Categories]
+      summary: Create a parent category (root level, requires tipo)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre, tipo]
+              example:
+                nombre: Ahorro
+                tipo: gasto
+                icono: piggyBank
+                color_hex: "#10B981"
+              properties:
+                nombre:
+                  type: string
+                tipo:
+                  type: string
+                  enum: [ingreso, gasto, transferencia]
+                icono:
+                  type: string
+                color_hex:
+                  type: string
+                  pattern: "^#[0-9A-Fa-f]{6}$"
+      responses:
+        "201":
+          description: Created
   /categories/system:
     get:
       tags: [Categories]
       summary: List system categories
       security:
         - bearerAuth: []
+      parameters:
+        - in: query
+          name: tipo
+          schema:
+            type: string
+            enum: [ingreso, gasto, transferencia]
+          description: Filter system categories by type.
       responses:
         "200":
           description: OK

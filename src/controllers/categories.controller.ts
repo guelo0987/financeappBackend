@@ -11,13 +11,22 @@ function getUserId(req: Request): number {
   return req.userId;
 }
 
+function parseTipoFilter(req: Request): string | undefined {
+  const tipo = req.query.tipo ? String(req.query.tipo).toLowerCase() : undefined;
+  if (tipo && !['ingreso', 'gasto', 'transferencia'].includes(tipo)) {
+    return undefined;
+  }
+  return tipo;
+}
+
 export async function getCategories(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const formato = String(req.query.formato ?? 'grouped').toLowerCase();
+    const tipo = parseTipoFilter(req);
     const data =
       formato === 'flat'
-        ? await categoriesService.getAllForUser(getUserId(req))
-        : await categoriesService.getGroupedForUser(getUserId(req));
+        ? await categoriesService.getAllForUser(getUserId(req), tipo)
+        : await categoriesService.getGroupedForUser(getUserId(req), tipo);
     res.json({ data });
   } catch (error) {
     next(error);
@@ -25,13 +34,33 @@ export async function getCategories(req: Request, res: Response, next: NextFunct
 }
 
 export async function getSystemCategories(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
   try {
-    const data = await categoriesService.getSystemCategories();
+    const tipo = parseTipoFilter(req);
+    const data = await categoriesService.getSystemCategories(tipo);
     res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getParentCategories(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const tipo = parseTipoFilter(req);
+    const data = await categoriesService.getParentsForUser(getUserId(req), tipo);
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createParentCategory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const data = await categoriesService.createParent(getUserId(req), req.body);
+    res.status(201).json({ data });
   } catch (error) {
     next(error);
   }

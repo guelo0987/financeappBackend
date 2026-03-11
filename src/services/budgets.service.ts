@@ -44,6 +44,14 @@ const updateBudgetSchema = z.object({
   ahorro_objetivo: z.number().min(0).optional(),
   activo: z.boolean().optional(),
   espacio_id: z.number().int().positive().nullable().optional(),
+  categorias: z
+    .array(
+      z.object({
+        categoriaId: z.number().int().positive(),
+        limite: z.number().positive(),
+      }),
+    )
+    .optional(),
   ingresos_detalle: z
     .array(
       z.object({
@@ -160,6 +168,11 @@ export class BudgetsService {
     if (payload.espacio_id) {
       await this.assertSpaceMembership(userId, payload.espacio_id);
     }
+    if (payload.categorias?.length) {
+      for (const item of payload.categorias) {
+        await this.ensureCategoryVisible(userId, item.categoriaId);
+      }
+    }
     if (payload.ingresos_detalle?.length) {
       for (const item of payload.ingresos_detalle) {
         await this.ensureCategoryVisible(userId, item.categoriaId);
@@ -192,6 +205,9 @@ export class BudgetsService {
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el presupuesto.');
 
+    if (payload.categorias !== undefined) {
+      await this.replaceCategories(userId, budgetId, payload.categorias);
+    }
     if (payload.ingresos_detalle !== undefined) {
       await this.replaceIncomeDetails(userId, budgetId, payload.ingresos_detalle);
     }
@@ -322,7 +338,7 @@ export class BudgetsService {
   private async getBudgetCategories(budgetId: number) {
     const { data, error } = await supabase
       .from('presupuesto_categorias')
-      .select('categoria_id, limite, categorias(categoria_id, slug, nombre, icono)')
+      .select('categoria_id, limite, categorias(categoria_id, categoria_padre_id, slug, nombre, tipo, icono, color_hex)')
       .eq('presupuesto_id', budgetId);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar las categorías del presupuesto.');
@@ -422,9 +438,12 @@ export class BudgetsService {
       const limite = Number(row.limite);
       return {
         categoriaId: Number(row.categoria_id),
+        categoria_padre_id: cat?.categoria_padre_id ? Number(cat.categoria_padre_id) : null,
         slug: cat?.slug ?? null,
         nombre: cat?.nombre ?? null,
+        tipo: cat?.tipo ?? null,
         icono: cat?.icono ?? null,
+        color_hex: cat?.color_hex ?? null,
         limite,
         gastado,
         restante: Math.max(0, limite - gastado),
@@ -482,7 +501,7 @@ export class BudgetsService {
     const budgetId = Number(budget.presupuesto_id);
     const { data, error } = await supabase
       .from('presupuesto_ingresos')
-      .select('categoria_id, monto_planeado, categorias(categoria_id, slug, nombre, icono)')
+      .select('categoria_id, monto_planeado, categorias(categoria_id, categoria_padre_id, slug, nombre, tipo, icono, color_hex)')
       .eq('presupuesto_id', budgetId);
 
     if (error) {
@@ -497,9 +516,12 @@ export class BudgetsService {
         const cat = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
         return {
           categoriaId: Number(row.categoria_id),
+          categoria_padre_id: cat?.categoria_padre_id ? Number(cat.categoria_padre_id) : null,
           slug: cat?.slug ?? null,
           nombre: cat?.nombre ?? null,
+          tipo: cat?.tipo ?? null,
           icono: cat?.icono ?? null,
+          color_hex: cat?.color_hex ?? null,
           monto_planeado: Number(row.monto_planeado),
         };
       });
@@ -509,9 +531,12 @@ export class BudgetsService {
       return [
         {
           categoriaId: null,
+          categoria_padre_id: null,
           slug: null,
           nombre: 'Ingresos generales',
+          tipo: 'ingreso' as const,
           icono: null,
+          color_hex: null,
           monto_planeado: Number(budget.ingresos),
         },
       ];

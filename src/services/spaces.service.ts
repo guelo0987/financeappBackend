@@ -1,7 +1,9 @@
 import { getSupabaseClient } from '../config/supabase';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../utils/errors';
+import { EmailService } from './email.service';
 
 const supabase: any = getSupabaseClient();
+const emailService = new EmailService();
 
 export class SpacesService {
   async listSpaces(userId: number) {
@@ -144,6 +146,19 @@ export class SpacesService {
       .single();
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo crear la invitación.');
+
+    const [{ data: user }, { data: space }] = await Promise.all([
+      supabase.from('usuarios').select('nombre').eq('usuario_id', userId).single(),
+      supabase.from('espacios_compartidos').select('nombre').eq('espacio_id', spaceId).single(),
+    ]);
+
+    await emailService.sendSpaceInvitation(
+      normalizedEmail,
+      user?.nombre || 'Alguien',
+      space?.nombre || 'un espacio',
+      data.token,
+    );
+
     return data;
   }
 

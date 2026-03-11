@@ -79,13 +79,17 @@ model activos {
 model categorias {
   categoria_id              BigInt                      @id @default(autoincrement())
   usuario_id                BigInt?
+  categoria_padre_id        BigInt?
   nombre                    String
-  tipo                      tipo_transaccion
+  tipo                      tipo_transaccion            @default(gasto)
   icono                     String                      @default("circle")
+  color_hex                 String                      @default("#6B7280")
   es_sistema                Boolean                     @default(false)
   creado_en                 DateTime                    @default(now()) @db.Timestamptz(6)
   slug                      String?
   usuario                   usuarios?                   @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: NoAction)
+  padre                     categorias?                 @relation("categoria_jerarquia", fields: [categoria_padre_id], references: [categoria_id], onUpdate: NoAction)
+  hijos                     categorias[]                @relation("categoria_jerarquia")
   presupuesto_categorias    presupuesto_categorias[]
   transacciones             transacciones[]
   transacciones_recurrentes transacciones_recurrentes[]

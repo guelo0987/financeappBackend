@@ -30,5 +30,6 @@ export interface UpdateBudgetDTO {
   ahorro_objetivo?: number;
   activo?: boolean;
   espacio_id?: number | null;
+  categorias?: BudgetCategoryInput[];
   ingresos_detalle?: BudgetIncomeInput[];
 }
