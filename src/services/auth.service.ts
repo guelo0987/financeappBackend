@@ -53,7 +53,7 @@ export class AuthService {
         moneda_base: dto.moneda_base ?? 'DOP',
       })
       .select(
-        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en',
+        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
       )
       .single();
 
@@ -227,7 +227,7 @@ export class AuthService {
   async getProfile(userId: number): Promise<UsuarioPublico> {
     const { data, error } = await supabase
       .from('usuarios')
-      .select('usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en')
+      .select('usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id')
       .eq('usuario_id', userId)
       .maybeSingle();
 
@@ -258,7 +258,7 @@ export class AuthService {
       .from('usuarios')
       .update(updateData)
       .eq('usuario_id', userId)
-      .select('usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en')
+      .select('usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id')
       .maybeSingle();
 
     if (error) {
@@ -328,6 +328,38 @@ export class AuthService {
     }
   }
 
+  async setDefaultBudget(userId: number, presupuestoId: number | null): Promise<void> {
+    if (presupuestoId !== null) {
+      const { data } = await supabase
+        .from('presupuestos')
+        .select('presupuesto_id, usuario_id, espacio_id')
+        .eq('presupuesto_id', presupuestoId)
+        .maybeSingle();
+
+      if (!data) throw new NotFoundError('NOT_FOUND', 'Presupuesto no encontrado.');
+
+      const esPropio = Number(data.usuario_id) === userId;
+      if (!esPropio && data.espacio_id) {
+        const { data: member } = await supabase
+          .from('espacio_miembros')
+          .select('usuario_id')
+          .eq('espacio_id', Number(data.espacio_id))
+          .eq('usuario_id', userId)
+          .maybeSingle();
+        if (!member) throw new NotFoundError('NOT_FOUND', 'No tienes acceso a ese presupuesto.');
+      } else if (!esPropio) {
+        throw new NotFoundError('NOT_FOUND', 'No tienes acceso a ese presupuesto.');
+      }
+    }
+
+    const { error } = await supabase
+      .from('usuarios')
+      .update({ presupuesto_default_id: presupuestoId })
+      .eq('usuario_id', userId);
+
+    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el presupuesto por defecto.');
+  }
+
   private mapUsuarioPublico(usuario: any): UsuarioPublico {
     return {
       usuario_id: usuario.usuario_id,
@@ -338,6 +370,7 @@ export class AuthService {
       meta_monto: usuario.meta_monto,
       meta_fecha: usuario.meta_fecha,
       creado_en: usuario.creado_en,
+      presupuesto_default_id: usuario.presupuesto_default_id ? Number(usuario.presupuesto_default_id) : null,
     };
   }
 }

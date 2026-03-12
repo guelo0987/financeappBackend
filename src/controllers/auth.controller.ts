@@ -85,3 +85,14 @@ export async function updatePassword(req: Request, res: Response, next: NextFunc
     next(error);
   }
 }
+
+export async function setDefaultBudget(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.userId) throw new UnauthorizedError('NO_AUTORIZADO', 'No autorizado.');
+    const presupuestoId = req.body.presupuesto_id === null ? null : Number(req.body.presupuesto_id);
+    await authService.setDefaultBudget(req.userId, presupuestoId);
+    res.json({ data: { presupuesto_default_id: presupuestoId } });
+  } catch (error) {
+    next(error);
+  }
+}

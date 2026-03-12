@@ -11,6 +11,15 @@ const supabase: any = getSupabaseClient();
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
+const TX_SELECT = [
+  'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id,',
+  'tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en,',
+  'categorias(categoria_id, slug, nombre, icono),',
+  'usuarios(usuario_id, nombre),',
+  'wallet_origen:activos!transacciones_activo_id_fkey(activo_id, nombre, tipo, moneda),',
+  'wallet_destino:activos!transacciones_activo_destino_id_fkey(activo_id, nombre, tipo, moneda)',
+].join(' ');
+
 const createSchema = z.object({
   fecha: z.string().regex(dateRegex, 'fecha inválida, use YYYY-MM-DD'),
   descripcion: z.string().min(1).max(255),
@@ -58,7 +67,7 @@ export class TransactionsService {
     let query = supabase
       .from('transacciones')
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
+        TX_SELECT,
         { count: 'exact' },
       );
 
@@ -113,7 +122,7 @@ export class TransactionsService {
     const { data, error } = await supabase
       .from('transacciones')
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
+        TX_SELECT,
       )
       .eq('transaccion_id', txnId)
       .maybeSingle();
@@ -172,7 +181,7 @@ export class TransactionsService {
         nota: payload.nota ?? null,
       })
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
+        TX_SELECT,
       )
       .single();
 
@@ -265,7 +274,7 @@ export class TransactionsService {
       .update(updateData)
       .eq('transaccion_id', txnId)
       .select(
-        'transaccion_id, usuario_id, presupuesto_id, espacio_id, activo_id, activo_destino_id, tipo, monto, moneda, categoria_id, descripcion, fecha, origen, nota, creado_en, actualizado_en, categorias(categoria_id, slug, nombre, icono)',
+        TX_SELECT,
       )
       .maybeSingle();
 
@@ -566,13 +575,24 @@ export class TransactionsService {
 
   private mapTransaction(row: any) {
     const category = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
+    const usuario = Array.isArray(row.usuarios) ? row.usuarios[0] : row.usuarios;
+    const walletOrigen = Array.isArray(row.wallet_origen) ? row.wallet_origen[0] : row.wallet_origen;
+    const walletDestino = Array.isArray(row.wallet_destino) ? row.wallet_destino[0] : row.wallet_destino;
+
     return {
       id: Number(row.transaccion_id),
       userId: row.usuario_id ? Number(row.usuario_id) : null,
+      usuario: usuario ? { id: Number(usuario.usuario_id), nombre: usuario.nombre } : null,
       budgetId: row.presupuesto_id ? Number(row.presupuesto_id) : null,
       espacio_id: row.espacio_id ? Number(row.espacio_id) : null,
       walletId: row.activo_id ? Number(row.activo_id) : null,
+      wallet: walletOrigen
+        ? { id: Number(walletOrigen.activo_id), nombre: walletOrigen.nombre, tipo: walletOrigen.tipo, moneda: walletOrigen.moneda }
+        : null,
       toWalletId: row.activo_destino_id ? Number(row.activo_destino_id) : null,
+      wallet_destino: walletDestino
+        ? { id: Number(walletDestino.activo_id), nombre: walletDestino.nombre, tipo: walletDestino.tipo, moneda: walletDestino.moneda }
+        : null,
       tipo: row.tipo,
       monto: Number(row.monto),
       moneda: row.moneda,

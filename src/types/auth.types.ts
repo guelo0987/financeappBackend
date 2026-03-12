@@ -55,6 +55,7 @@ export interface UsuarioPublico {
   meta_monto: any;
   meta_fecha: Date | null;
   creado_en: Date;
+  presupuesto_default_id: number | null;
 }
 
 export interface SuscripcionResumen {

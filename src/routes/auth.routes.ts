@@ -5,6 +5,7 @@ import {
   me,
   refresh,
   register,
+  setDefaultBudget,
   updateMe,
   updatePassword,
 } from '../controllers/auth.controller';
@@ -19,5 +20,6 @@ router.post('/logout', authMiddleware, logout);
 router.get('/me', authMiddleware, me);
 router.patch('/me', authMiddleware, updateMe);
 router.put('/password', authMiddleware, updatePassword);
+router.patch('/me/default-budget', authMiddleware, setDefaultBudget);
 
 export default router;
