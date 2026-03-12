@@ -14,6 +14,7 @@ const envSchema = z.object({
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
   RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY es requerido'),
   EMAIL_FROM: z.string().email('EMAIL_FROM debe ser un email válido'),
+  APP_URL: z.string().url().default('http://localhost:3000'),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -152,12 +152,18 @@ export class SpacesService {
       supabase.from('espacios_compartidos').select('nombre').eq('espacio_id', spaceId).single(),
     ]);
 
-    await emailService.sendBudgetInvitation(
-      normalizedEmail,
-      user?.nombre || 'Alguien',
-      space?.nombre || 'un espacio',
-      data.token,
-    );
+    try {
+      await emailService.sendBudgetInvitation(
+        normalizedEmail,
+        user?.nombre || 'Alguien',
+        space?.nombre || 'un espacio',
+        data.token,
+      );
+    } catch (emailError) {
+      await supabase.from('espacio_invitaciones').delete().eq('invitacion_id', Number(data.invitacion_id));
+      console.error(`Email fallido para ${normalizedEmail}:`, emailError);
+      throw new BadRequestError('EMAIL_ERROR', 'No se pudo enviar el correo de invitación.');
+    }
 
     return data;
   }

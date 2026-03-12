@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
+import alertsRoutes from './routes/alerts.routes';
 import authRoutes from './routes/auth.routes';
 import budgetsRoutes from './routes/budgets.routes';
 import categoriesRoutes from './routes/categories.routes';
@@ -26,6 +27,7 @@ app.get('/health', (_req, res) => {
   res.json({ data: { status: 'ok' } });
 });
 
+app.use('/alerts', alertsRoutes);
 app.use('/auth', authRoutes);
 app.use('/budgets', budgetsRoutes);
 app.use('/categories', categoriesRoutes);

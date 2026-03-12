@@ -339,12 +339,38 @@ export class BudgetsService {
     const { data: invite, error: inviteError } = await supabase
       .from('espacio_invitaciones')
       .insert({ espacio_id: espacioId, invitado_por: userId, email_invitado: normalizedEmail })
-      .select('token')
+      .select('invitacion_id, token')
       .single();
 
     if (inviteError) throw new BadRequestError('DB_ERROR', `No se pudo crear la invitación para ${normalizedEmail}.`);
 
-    await emailService.sendBudgetInvitation(normalizedEmail, inviterName, budgetNombre, invite.token);
+    try {
+      await emailService.sendBudgetInvitation(normalizedEmail, inviterName, budgetNombre, invite.token);
+    } catch (emailError) {
+      // Rollback: delete the invitation so it doesn't stay orphaned
+      await supabase.from('espacio_invitaciones').delete().eq('invitacion_id', Number(invite.invitacion_id));
+      console.error(`Email fallido para ${normalizedEmail}:`, emailError);
+      throw new BadRequestError('EMAIL_ERROR', `No se pudo enviar el correo de invitación a ${normalizedEmail}.`);
+    }
+
+    // Create in-app alert if the invited user already has an account
+    if (existingUser) {
+      const { error: alertError } = await supabase.from('alertas').insert({
+        usuario_id: Number(existingUser.usuario_id),
+        tipo: 'invitacion_presupuesto',
+        titulo: `${inviterName} te invitó a un presupuesto`,
+        cuerpo: `${inviterName} te ha invitado a colaborar en "${budgetNombre}". Acepta la invitación para comenzar.`,
+        datos_extra: {
+          token: invite.token,
+          presupuesto_id: budgetId,
+          espacio_id: espacioId,
+          invitado_por: inviterName,
+          budget_nombre: budgetNombre,
+        },
+        espacio_id: espacioId,
+      });
+      if (alertError) console.error('Error creando alerta de invitación:', alertError);
+    }
   }
 
   async listMembers(userId: number, budgetId: number) {

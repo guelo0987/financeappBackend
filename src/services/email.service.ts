@@ -5,7 +5,7 @@ const resend = new Resend(env.RESEND_API_KEY);
 
 export class EmailService {
   async sendBudgetInvitation(toEmail: string, inviterName: string, budgetName: string, token: string) {
-    const inviteLink = `https://finance.bot.dlcsoft.dev/invitations/${token}/accept?email=${encodeURIComponent(toEmail)}`;
+    const inviteLink = `${env.APP_URL}/invitations/${token}/accept?email=${encodeURIComponent(toEmail)}`;
 
     const { data, error } = await resend.emails.send({
       from: env.EMAIL_FROM,

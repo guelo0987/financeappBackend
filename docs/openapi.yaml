@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: FinanceApp Backend API
-  version: 1.0.0
-  description: Swagger documentation for the FinanceApp backend.
+  title: WealthOS Backend API
+  version: 2.0.0
+  description: Swagger documentation for the WealthOS backend.
 servers:
   - url: http://localhost:3000
 tags:
@@ -17,6 +17,7 @@ tags:
   - name: Insights
   - name: Spaces
   - name: Invitations
+  - name: Alerts
 components:
   securitySchemes:
     bearerAuth:
@@ -81,7 +82,6 @@ components:
           description: Se hereda del padre si se envía categoria_padre_id. Default gasto.
         icono:
           type: string
-          description: "Nombres de iconos permitidos: home, utensils, car, sparkles, pill, bookOpen, tv, trendingUp, arrowLeftRight, keySquare, zap, droplets, wifi, wrench, shield, coffee, package, shoppingCart, fuel, bus, plane, shirt, heart, creditCard, smile, dumbbell, stethoscope, monitorPlay, book, graduationCap, film, gamepad2, map, briefcase, laptop, barChart2, store, gift, circle"
         color_hex:
           type: string
           pattern: "^#[0-9A-Fa-f]{6}$"
@@ -92,11 +92,6 @@ components:
     CategoryUpdateRequest:
       type: object
       description: All fields are optional.
-      example:
-        nombre: Conciertos y Eventos
-        icono: ticket
-        color_hex: "#F59E0B"
-        categoria_padre_id: 7
       properties:
         nombre:
           type: string
@@ -121,6 +116,7 @@ components:
         moneda: DOP
         color_hex: "#EF4444"
         icono: creditCard
+        incluir_en_patrimonio: false
       properties:
         nombre:
           type: string
@@ -136,12 +132,13 @@ components:
           type: string
         icono:
           type: string
+        incluir_en_patrimonio:
+          type: boolean
+          default: true
+          description: Si false, no suma al patrimonio neto. Útil para tarjetas de crédito.
     WalletUpdateRequest:
       type: object
       description: All fields are optional.
-      example:
-        tipo: cuentas
-        saldo: 25000
       properties:
         nombre:
           type: string
@@ -157,6 +154,8 @@ components:
           type: string
         icono:
           type: string
+        incluir_en_patrimonio:
+          type: boolean
     TransactionRequest:
       type: object
       required: [fecha, descripcion, monto, tipo, budgetId, catKey, walletId]
@@ -182,7 +181,6 @@ components:
           enum: [ingreso, gasto, transferencia]
         budgetId:
           type: integer
-          description: Presupuesto al que pertenece la transacción.
         catKey:
           type: string
         walletId:
@@ -197,10 +195,6 @@ components:
     TransactionUpdateRequest:
       type: object
       description: All fields are optional.
-      example:
-        descripcion: "Compra hogar quincenal"
-        nota: "Supermercado compartido"
-        budgetId: 1
       properties:
         fecha:
           type: string
@@ -231,21 +225,19 @@ components:
       type: object
       required: [nombre, periodo]
       example:
-        nombre: Presupuesto Marzo Casa
+        nombre: Gastos del hogar
         periodo: mensual
         dia_inicio: 1
         ahorro_objetivo: 12000
         ingresos_detalle:
           - categoriaId: 101
             monto: 85000
-          - categoriaId: 102
-            monto: 12000
         categorias:
           - categoriaId: 201
             limite: 25000
-          - categoriaId: 202
-            limite: 18000
-        espacio_id: null
+        invitados:
+          - "maria@gmail.com"
+          - "pedro@gmail.com"
       properties:
         nombre:
           type: string
@@ -260,22 +252,8 @@ components:
           type: number
         ahorro_objetivo:
           type: number
-          description: Meta de ahorro para el período.
         activo:
           type: boolean
-        espacio_id:
-          type: integer
-          nullable: true
-        ingresos_detalle:
-          type: array
-          description: Fuentes de ingresos planeadas (categorías visibles del usuario o del sistema).
-          items:
-            type: object
-            properties:
-              categoriaId:
-                type: integer
-              monto:
-                type: number
         categorias:
           type: array
           description: Límites de gasto por categoría.
@@ -286,16 +264,31 @@ components:
                 type: integer
               limite:
                 type: number
+        ingresos_detalle:
+          type: array
+          description: Fuentes de ingresos planeadas.
+          items:
+            type: object
+            properties:
+              categoriaId:
+                type: integer
+              monto:
+                type: number
+        invitados:
+          type: array
+          description: Emails a invitar al presupuesto. Máximo 3 (dueño + 3 = 4 total). Se envía email y se crea alerta si el invitado ya tiene cuenta.
+          maxItems: 3
+          items:
+            type: string
+            format: email
     BudgetUpdateRequest:
       type: object
-      description: All fields are optional. Crear y editar tienen simetría completa.
+      description: All fields are optional.
       example:
         ahorro_objetivo: 15000
         categorias:
           - categoriaId: 201
             limite: 28000
-          - categoriaId: 202
-            limite: 20000
         ingresos_detalle:
           - categoriaId: 101
             monto: 90000
@@ -315,9 +308,6 @@ components:
           type: number
         activo:
           type: boolean
-        espacio_id:
-          type: integer
-          nullable: true
         categorias:
           type: array
           description: Reemplaza todos los límites de gasto por categoría del presupuesto.
@@ -386,10 +376,6 @@ components:
     RecurringUpdateRequest:
       type: object
       description: All fields are optional.
-      example:
-        budgetId: 2
-        monto: 28000
-        diaEjecucion: 28
       properties:
         budgetId:
           type: integer
@@ -441,22 +427,6 @@ components:
           type: string
           example: "2026-12-31"
           nullable: true
-    SpaceRequest:
-      type: object
-      required: [nombre]
-      properties:
-        nombre:
-          type: string
-        descripcion:
-          type: string
-          nullable: true
-    InviteRequest:
-      type: object
-      required: [email]
-      properties:
-        email:
-          type: string
-          format: email
     AcceptInviteRequest:
       type: object
       required: [email]
@@ -464,6 +434,32 @@ components:
         email:
           type: string
           format: email
+    AlertResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        tipo:
+          type: string
+          enum: [gasto_elevado, meta_progreso, oportunidad_inversion, suscripcion_vence, tasa_cambio, ia_insight, invitacion_presupuesto, invitacion_aceptada]
+        titulo:
+          type: string
+        cuerpo:
+          type: string
+        fue_leida:
+          type: boolean
+        espacio_id:
+          type: integer
+          nullable: true
+        datos_extra:
+          type: object
+          description: |
+            Para invitacion_presupuesto: { token, presupuesto_id, espacio_id, invitado_por, budget_nombre }
+            Para invitacion_aceptada: { espacio_id, presupuesto_id, budget_nombre }
+        creado_en:
+          type: string
+          format: date-time
+
 paths:
   /health:
     get:
@@ -477,6 +473,7 @@ paths:
     post:
       tags: [Auth]
       summary: Register user
+      description: Al registrarse, si el email tiene invitaciones pendientes se aceptan automáticamente y se crea una alerta de tipo invitacion_aceptada.
       requestBody:
         required: true
         content:
@@ -569,7 +566,7 @@ paths:
   /categories:
     get:
       tags: [Categories]
-      summary: List categories (grouped by parent by default)
+      summary: List categories
       security:
         - bearerAuth: []
       parameters:
@@ -579,13 +576,11 @@ paths:
             type: string
             enum: [grouped, flat]
             default: grouped
-          description: grouped returns parent+children, flat returns raw rows.
         - in: query
           name: tipo
           schema:
             type: string
             enum: [ingreso, gasto, transferencia]
-          description: Filter categories by type.
       responses:
         "200":
           description: OK
@@ -606,7 +601,7 @@ paths:
   /categories/parents:
     get:
       tags: [Categories]
-      summary: List parent categories only (categoria_padre_id is null)
+      summary: List parent categories only
       security:
         - bearerAuth: []
       parameters:
@@ -615,13 +610,12 @@ paths:
           schema:
             type: string
             enum: [ingreso, gasto, transferencia]
-          description: Filter parent categories by type.
       responses:
         "200":
           description: OK
     post:
       tags: [Categories]
-      summary: Create a parent category (root level, requires tipo)
+      summary: Create a parent category (requires tipo)
       security:
         - bearerAuth: []
       requestBody:
@@ -631,11 +625,6 @@ paths:
             schema:
               type: object
               required: [nombre, tipo]
-              example:
-                nombre: Ahorro
-                tipo: gasto
-                icono: piggyBank
-                color_hex: "#10B981"
               properties:
                 nombre:
                   type: string
@@ -662,7 +651,6 @@ paths:
           schema:
             type: string
             enum: [ingreso, gasto, transferencia]
-          description: Filter system categories by type.
       responses:
         "200":
           description: OK
@@ -704,6 +692,7 @@ paths:
     get:
       tags: [Wallets]
       summary: List wallets
+      description: La respuesta incluye es_default e incluir_en_patrimonio por cada wallet.
       security:
         - bearerAuth: []
       responses:
@@ -711,6 +700,7 @@ paths:
     post:
       tags: [Wallets]
       summary: Create wallet
+      description: La primera wallet creada se auto-asigna como default.
       security:
         - bearerAuth: []
       requestBody:
@@ -724,7 +714,8 @@ paths:
   /wallets/summary:
     get:
       tags: [Wallets]
-      summary: Wallet summary
+      summary: Wallet summary (patrimonio neto)
+      description: Solo suma wallets con incluir_en_patrimonio true.
       security:
         - bearerAuth: []
       responses:
@@ -763,6 +754,20 @@ paths:
     delete:
       tags: [Wallets]
       summary: Delete wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /wallets/{id}/set-default:
+    patch:
+      tags: [Wallets]
+      summary: Set wallet as default
+      description: Marca esta wallet como la default del usuario. No requiere body.
       security:
         - bearerAuth: []
       parameters:
@@ -889,6 +894,7 @@ paths:
     get:
       tags: [Budgets]
       summary: List budgets
+      description: Incluye presupuestos propios y compartidos (donde el usuario es miembro).
       security:
         - bearerAuth: []
       responses:
@@ -896,6 +902,10 @@ paths:
     post:
       tags: [Budgets]
       summary: Create budget
+      description: |
+        Si se envía invitados, se crea un espacio compartido automáticamente,
+        se envía email a cada invitado y se crea una alerta si ya tienen cuenta.
+        Máximo 3 invitados (dueño + 3 = 4 personas total).
       security:
         - bearerAuth: []
       requestBody:
@@ -909,7 +919,13 @@ paths:
   /budgets/{id}:
     get:
       tags: [Budgets]
-      summary: Get budget
+      summary: Get budget detail
+      description: |
+        Respuesta incluye:
+        - categorias: gastos de categorías con límite configurado
+        - otros_gastos: gastos del presupuesto en categorías sin límite
+        - total_gastado_real: suma de categorias + otros_gastos
+        - ingresos_actuales.otros_ingresos: ingresos en categorías fuera del plan
       security:
         - bearerAuth: []
       parameters:
@@ -965,12 +981,70 @@ paths:
   /budgets/{id}/spending:
     get:
       tags: [Budgets]
-      summary: Budget spending by category
+      summary: Budget spending
+      description: Devuelve categorias (con límite), otros_gastos (sin límite) y total_gastado_real.
       security:
         - bearerAuth: []
       parameters:
         - in: path
           name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: OK }
+  /budgets/{id}/members:
+    get:
+      tags: [Budgets]
+      summary: List budget members
+      description: Retorna lista vacía si el presupuesto no tiene espacio compartido.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        usuario_id:
+                          type: integer
+                        nombre:
+                          type: string
+                        email:
+                          type: string
+                        rol:
+                          type: string
+                          enum: [admin, miembro]
+                        es_propietario:
+                          type: boolean
+                        unido_en:
+                          type: string
+                          format: date-time
+  /budgets/{id}/members/{userId}:
+    delete:
+      tags: [Budgets]
+      summary: Remove budget member
+      description: Solo el dueño (admin) puede expulsar miembros. No se puede remover al propietario.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: userId
           required: true
           schema: { type: integer }
       responses:
@@ -1055,6 +1129,9 @@ paths:
     post:
       tags: [Recurring]
       summary: Create recurring transaction
+      description: |
+        proxima_ejecucion se calcula inteligente: si el diaEjecucion aún no pasó en el mes actual
+        se ejecuta este mes, si ya pasó se ejecuta el siguiente.
       security:
         - bearerAuth: []
       requestBody:
@@ -1112,7 +1189,8 @@ paths:
   /recurring/process:
     post:
       tags: [Recurring]
-      summary: Process due recurring transactions
+      summary: Manually process due recurring transactions
+      description: El cron job lo ejecuta automáticamente a las 6AM diario. Este endpoint es para pruebas.
       security:
         - bearerAuth: []
       responses:
@@ -1151,23 +1229,11 @@ paths:
     get:
       tags: [Spaces]
       summary: List spaces
+      description: Los espacios son infraestructura interna. Se crean automáticamente al invitar a un presupuesto.
       security:
         - bearerAuth: []
       responses:
         "200": { description: OK }
-    post:
-      tags: [Spaces]
-      summary: Create space
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SpaceRequest"
-      responses:
-        "201": { description: Created }
   /spaces/{id}:
     get:
       tags: [Spaces]
@@ -1183,7 +1249,7 @@ paths:
         "200": { description: OK }
     delete:
       tags: [Spaces]
-      summary: Delete space (admin)
+      summary: Delete space
       security:
         - bearerAuth: []
       parameters:
@@ -1193,29 +1259,10 @@ paths:
           schema: { type: integer }
       responses:
         "200": { description: OK }
-  /spaces/{id}/invite:
-    post:
-      tags: [Spaces]
-      summary: Invite member by email
-      security:
-        - bearerAuth: []
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: integer }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InviteRequest"
-      responses:
-        "201": { description: Created }
   /spaces/{id}/members:
     get:
       tags: [Spaces]
-      summary: List members
+      summary: List space members
       security:
         - bearerAuth: []
       parameters:
@@ -1255,7 +1302,7 @@ paths:
         "200": { description: OK }
     delete:
       tags: [Spaces]
-      summary: Remove member
+      summary: Remove member from space
       security:
         - bearerAuth: []
       parameters:
@@ -1301,9 +1348,32 @@ paths:
         "200": { description: OK }
 
   /invitations/{token}/accept:
+    get:
+      tags: [Invitations]
+      summary: Invitation accept page (browser)
+      description: Devuelve una página HTML con botón para aceptar. Útil cuando el invitado hace clic en el email desde el navegador.
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string }
+        - in: query
+          name: email
+          required: true
+          schema: { type: string, format: email }
+      responses:
+        "200":
+          description: HTML page
+          content:
+            text/html:
+              schema:
+                type: string
     post:
       tags: [Invitations]
-      summary: Accept invitation (public)
+      summary: Accept invitation
+      description: |
+        Acepta una invitación pendiente. El usuario debe tener cuenta registrada con ese email.
+        Agrega al usuario como miembro del espacio compartido del presupuesto.
       parameters:
         - in: path
           name: token
@@ -1317,3 +1387,83 @@ paths:
               $ref: "#/components/schemas/AcceptInviteRequest"
       responses:
         "200": { description: OK }
+
+  /alerts:
+    get:
+      tags: [Alerts]
+      summary: List alerts
+      description: |
+        Devuelve alertas del usuario ordenadas por más recientes primero.
+        Tipos de alerta: gasto_elevado, meta_progreso, oportunidad_inversion, suscripcion_vence,
+        tasa_cambio, ia_insight, invitacion_presupuesto, invitacion_aceptada.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: no_leidas
+          schema:
+            type: boolean
+            default: false
+          description: Si true, devuelve solo alertas no leídas.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AlertResponse"
+  /alerts/unread-count:
+    get:
+      tags: [Alerts]
+      summary: Get unread alert count
+      description: Útil para mostrar badge en el ícono de notificaciones.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      no_leidas:
+                        type: integer
+                        example: 3
+  /alerts/read-all:
+    patch:
+      tags: [Alerts]
+      summary: Mark all alerts as read
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: OK }
+  /alerts/{id}/read:
+    patch:
+      tags: [Alerts]
+      summary: Mark alert as read
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AlertResponse"

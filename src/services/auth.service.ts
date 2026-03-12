@@ -87,11 +87,69 @@ export class AuthService {
     }
 
     const userId = Number(usuario.usuario_id);
+
+    // Auto-accept any pending invitations for this email
+    await this.acceptPendingInvitations(userId, emailNormalizado);
+
     return {
       usuario: this.mapUsuarioPublico(usuario),
       accessToken: generarAccessToken(userId, usuario.email),
       refreshToken: generarRefreshToken(userId, usuario.email),
     };
+  }
+
+  private async acceptPendingInvitations(userId: number, email: string): Promise<void> {
+    const now = new Date().toISOString();
+
+    const { data: invitations } = await supabase
+      .from('espacio_invitaciones')
+      .select('invitacion_id, espacio_id, espacios_compartidos(nombre)')
+      .eq('email_invitado', email)
+      .eq('estado', 'pendiente')
+      .gte('expira_en', now);
+
+    if (!invitations?.length) return;
+
+    for (const inv of invitations) {
+      const espacioNombre = Array.isArray(inv.espacios_compartidos)
+        ? inv.espacios_compartidos[0]?.nombre
+        : inv.espacios_compartidos?.nombre;
+
+      // Fetch the budget linked to this space for deep-link support
+      const { data: presupuesto } = await supabase
+        .from('presupuestos')
+        .select('presupuesto_id')
+        .eq('espacio_id', inv.espacio_id)
+        .maybeSingle();
+
+      // Add as member
+      await supabase.from('espacio_miembros').insert({
+        espacio_id: inv.espacio_id,
+        usuario_id: userId,
+        rol: 'miembro',
+      });
+
+      // Mark invitation as accepted
+      await supabase
+        .from('espacio_invitaciones')
+        .update({ estado: 'aceptada' })
+        .eq('invitacion_id', inv.invitacion_id);
+
+      // Create alert so user sees it on first login
+      const { error: alertError } = await supabase.from('alertas').insert({
+        usuario_id: userId,
+        tipo: 'invitacion_aceptada',
+        titulo: 'Te uniste a un presupuesto compartido',
+        cuerpo: `Ahora eres miembro del presupuesto "${espacioNombre ?? 'compartido'}". Ya puedes ver y registrar transacciones.`,
+        datos_extra: {
+          espacio_id: inv.espacio_id,
+          presupuesto_id: presupuesto ? Number(presupuesto.presupuesto_id) : null,
+          budget_nombre: espacioNombre ?? null,
+        },
+        espacio_id: inv.espacio_id,
+      });
+      if (alertError) console.error('Error creando alerta de invitación aceptada:', alertError);
+    }
   }
 
   async login(dto: LoginDTO): Promise<LoginResponse> {
