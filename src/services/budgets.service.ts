@@ -743,32 +743,37 @@ export class BudgetsService {
       .map((item) => item.categoriaId)
       .filter((value): value is number => typeof value === 'number');
 
-    let txQuery = supabase
-      .from('transacciones')
-      .select('categoria_id, monto')
-      .eq('presupuesto_id', Number(budget.presupuesto_id))
-      .eq('tipo', 'ingreso')
-      .gte('fecha', range.desde)
-      .lte('fecha', range.hasta);
+    const baseQuery = () => {
+      let q = supabase
+        .from('transacciones')
+        .select('categoria_id, monto, categorias(categoria_id, categoria_padre_id, slug, nombre, tipo, icono, color_hex)')
+        .eq('presupuesto_id', Number(budget.presupuesto_id))
+        .eq('tipo', 'ingreso')
+        .gte('fecha', range.desde)
+        .lte('fecha', range.hasta);
 
-    if (budget.espacio_id) {
-      txQuery = txQuery.eq('espacio_id', Number(budget.espacio_id));
-    } else {
-      txQuery = txQuery.eq('usuario_id', userId).is('espacio_id', null);
-    }
+      if (budget.espacio_id) {
+        q = q.eq('espacio_id', Number(budget.espacio_id));
+      } else {
+        q = q.eq('usuario_id', userId).is('espacio_id', null);
+      }
+      return q;
+    };
 
+    // Planned income transactions
+    let plannedQuery = baseQuery();
     if (categoryIds.length > 0) {
-      txQuery = txQuery.in('categoria_id', categoryIds);
+      plannedQuery = plannedQuery.in('categoria_id', categoryIds);
     }
 
-    const { data, error } = await txQuery;
-    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo calcular ingresos del presupuesto.');
+    const { data: plannedData, error: plannedError } = await plannedQuery;
+    if (plannedError) throw new BadRequestError('DB_ERROR', 'No se pudo calcular ingresos del presupuesto.');
 
     const actualMap = new Map<number, number>();
-    let totalActual = 0;
-    for (const row of data ?? []) {
+    let totalActualPlanned = 0;
+    for (const row of plannedData ?? []) {
       const amount = Number(row.monto);
-      totalActual += amount;
+      totalActualPlanned += amount;
       if (row.categoria_id) {
         const key = Number(row.categoria_id);
         actualMap.set(key, (actualMap.get(key) ?? 0) + amount);
@@ -776,7 +781,7 @@ export class BudgetsService {
     }
 
     const detalle = incomePlan.map((item) => {
-      const actual = item.categoriaId ? actualMap.get(item.categoriaId) ?? 0 : totalActual;
+      const actual = item.categoriaId ? actualMap.get(item.categoriaId) ?? 0 : totalActualPlanned;
       return {
         ...item,
         monto_actual: actual,
@@ -784,10 +789,43 @@ export class BudgetsService {
       };
     });
 
+    // Unplanned income transactions (categories not in the income plan)
+    let otrosIngresosData: any[] = [];
+    if (categoryIds.length > 0) {
+      let unplannedQuery = baseQuery().not('categoria_id', 'in', `(${categoryIds.join(',')})`);
+      const { data: unplannedData, error: unplannedError } = await unplannedQuery;
+      if (unplannedError) throw new BadRequestError('DB_ERROR', 'No se pudo calcular ingresos fuera del plan.');
+
+      const unplannedMap = new Map<number, { monto: number; cat: any }>();
+      for (const row of unplannedData ?? []) {
+        const catId = Number(row.categoria_id);
+        const existing = unplannedMap.get(catId);
+        const cat = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
+        unplannedMap.set(catId, {
+          monto: (existing?.monto ?? 0) + Number(row.monto),
+          cat: existing?.cat ?? cat,
+        });
+      }
+
+      otrosIngresosData = Array.from(unplannedMap.entries()).map(([catId, { monto, cat }]) => ({
+        categoriaId: catId,
+        categoria_padre_id: cat?.categoria_padre_id ? Number(cat.categoria_padre_id) : null,
+        slug: cat?.slug ?? null,
+        nombre: cat?.nombre ?? null,
+        tipo: cat?.tipo ?? null,
+        icono: cat?.icono ?? null,
+        color_hex: cat?.color_hex ?? null,
+        monto_actual: monto,
+      }));
+    }
+
+    const totalOtrosIngresos = otrosIngresosData.reduce((sum, r) => sum + r.monto_actual, 0);
+
     return {
       total_planeado: incomePlan.reduce((acc, item) => acc + item.monto_planeado, 0),
-      total_actual: totalActual,
+      total_actual: totalActualPlanned + totalOtrosIngresos,
       detalle,
+      otros_ingresos: otrosIngresosData,
     };
   }
 
