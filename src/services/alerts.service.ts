@@ -7,21 +7,33 @@ const ALERT_SELECT =
   'alerta_id, tipo, titulo, cuerpo, datos_extra, fue_leida, fue_enviada, espacio_id, creado_en';
 
 export class AlertsService {
-  async getAll(userId: number, soloNoLeidas?: boolean) {
+  async getAll(userId: number, soloNoLeidas?: boolean, page = 1, limit = 20) {
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.max(1, Math.min(100, limit));
+    const from = (safePage - 1) * safeLimit;
+    const to = from + safeLimit - 1;
+
     let query = supabase
       .from('alertas')
-      .select(ALERT_SELECT)
+      .select(ALERT_SELECT, { count: 'exact' })
       .eq('usuario_id', userId)
-      .order('creado_en', { ascending: false });
+      .order('creado_en', { ascending: false })
+      .range(from, to);
 
     if (soloNoLeidas) {
       query = query.eq('fue_leida', false);
     }
 
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar las alertas.');
 
-    return (data ?? []).map(this.mapAlert);
+    const total = count ?? 0;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / safeLimit);
+
+    return {
+      data: (data ?? []).map(this.mapAlert),
+      meta: { page: safePage, limit: safeLimit, total, totalPages, hasMore: safePage < totalPages },
+    };
   }
 
   async markAsRead(userId: number, alertId: number) {

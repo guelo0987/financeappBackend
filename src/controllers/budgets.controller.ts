@@ -122,6 +122,21 @@ export async function updateBudgetCategory(
   }
 }
 
+export async function inviteBudgetMember(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const budgetId = parsePositiveInt(req.params.id, 'budgetId');
+    const email = String(req.body.email ?? '');
+    const data = await budgetsService.inviteMember(requireUserId(req), budgetId, email);
+    res.status(201).json({ data });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function listBudgetMembers(
   req: Request,
   res: Response,

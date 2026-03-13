@@ -155,7 +155,17 @@ export class TransactionsService {
     }
 
     const budget = await this.getAccessibleBudget(userId, payload.budgetId);
-    await this.validateWalletOwnership(userId, payload.walletId);
+    const wallet = await this.validateWalletOwnership(userId, payload.walletId);
+
+    // Validate currency match between transaction and wallet
+    const txnMoneda = payload.moneda ?? 'DOP';
+    if (wallet.moneda && wallet.moneda !== txnMoneda) {
+      throw new BadRequestError(
+        'MONEDA_MISMATCH',
+        `La moneda de la transacción (${txnMoneda}) no coincide con la de la cuenta (${wallet.moneda}).`,
+      );
+    }
+
     if (payload.toWalletId) await this.validateWalletOwnership(userId, payload.toWalletId);
 
     const categoriaId = await this.resolveCategoryId(userId, payload.catKey);
@@ -235,7 +245,14 @@ export class TransactionsService {
     }
 
     if (payload.walletId !== undefined || isOwner) {
-      await this.validateWalletOwnership(userId, nextWalletId);
+      const wallet = await this.validateWalletOwnership(userId, nextWalletId);
+      const nextMoneda = payload.moneda ?? existing.moneda;
+      if (wallet.moneda && nextMoneda && wallet.moneda !== nextMoneda) {
+        throw new BadRequestError(
+          'MONEDA_MISMATCH',
+          `La moneda de la transacción (${nextMoneda}) no coincide con la de la cuenta (${wallet.moneda}).`,
+        );
+      }
     }
     if (typeof nextToWalletId === 'number' && (payload.toWalletId !== undefined || isOwner)) {
       await this.validateWalletOwnership(userId, nextToWalletId);
@@ -298,17 +315,19 @@ export class TransactionsService {
     const existing = await this.getById(userId, txnId);
     await this.assertTransactionWritable(userId, existing);
 
+    const ownerUserId = Number(existing.userId ?? userId);
+
     const { error } = await supabase
       .from('transacciones')
       .delete()
-      .eq('transaccion_id', txnId);
+      .eq('transaccion_id', txnId)
+      .eq('usuario_id', ownerUserId); // defense-in-depth: scope to transaction owner
 
     if (error) {
       throw new BadRequestError('DB_ERROR', 'No se pudo eliminar la transacción.');
     }
 
     const revertImpact = this.negateAdjustments(this.computeWalletAdjustments(existing));
-    const ownerUserId = Number(existing.userId ?? userId);
     await this.applyWalletAdjustments(ownerUserId, revertImpact);
   }
 
@@ -329,10 +348,10 @@ export class TransactionsService {
     return Number(data.categoria_id);
   }
 
-  private async validateWalletOwnership(userId: number, walletId: number): Promise<void> {
+  private async validateWalletOwnership(userId: number, walletId: number): Promise<{ moneda: string }> {
     const { data, error } = await supabase
       .from('activos')
-      .select('activo_id')
+      .select('activo_id, moneda')
       .eq('activo_id', walletId)
       .eq('usuario_id', userId)
       .maybeSingle();
@@ -344,6 +363,8 @@ export class TransactionsService {
     if (!data) {
       throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'La cuenta indicada no existe o no pertenece al usuario.');
     }
+
+    return { moneda: data.moneda };
   }
 
   private async assertSpaceMembership(userId: number, spaceId: number): Promise<string> {
@@ -392,9 +413,14 @@ export class TransactionsService {
   private async assertTransactionWritable(userId: number, txn: any): Promise<void> {
     const budgetIdRaw = txn.presupuesto_id ?? txn.budgetId;
     const budgetId = budgetIdRaw === null || budgetIdRaw === undefined ? null : Number(budgetIdRaw);
+    const txnOwnerId = Number(txn.usuario_id ?? txn.userId);
     if (budgetId) {
       const budget = await this.getAccessibleBudget(userId, budgetId);
+      // Budget owner can modify any transaction
       if (Number(budget.usuario_id) === userId) return;
+      // Transaction creator can modify their own
+      if (txnOwnerId === userId) return;
+      // Space admin can modify any transaction
       const role = await this.assertSpaceMembership(userId, Number(budget.espacio_id));
       if (role !== 'admin') {
         throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No puede modificar esta transacción.');
@@ -422,37 +448,28 @@ export class TransactionsService {
   }
 
   private async getAccessibleBudgetIds(userId: number): Promise<number[]> {
-    const { data: ownBudgets, error: ownError } = await supabase
-      .from('presupuestos')
-      .select('presupuesto_id')
-      .eq('usuario_id', userId);
-    if (ownError) {
-      throw new BadRequestError('DB_ERROR', 'No se pudieron validar los presupuestos del usuario.');
-    }
+    // Run own budgets and space memberships in parallel
+    const [ownResult, memberResult] = await Promise.all([
+      supabase.from('presupuestos').select('presupuesto_id').eq('usuario_id', userId),
+      supabase.from('espacio_miembros').select('espacio_id').eq('usuario_id', userId),
+    ]);
 
-    const { data: memberships, error: membershipError } = await supabase
-      .from('espacio_miembros')
-      .select('espacio_id')
-      .eq('usuario_id', userId);
-    if (membershipError) {
-      throw new BadRequestError('DB_ERROR', 'No se pudieron validar espacios compartidos.');
-    }
+    if (ownResult.error) throw new BadRequestError('DB_ERROR', 'No se pudieron validar los presupuestos del usuario.');
+    if (memberResult.error) throw new BadRequestError('DB_ERROR', 'No se pudieron validar espacios compartidos.');
 
-    const spaceIds = (memberships ?? []).map((row: any) => Number(row.espacio_id));
+    const spaceIds = (memberResult.data ?? []).map((row: any) => Number(row.espacio_id));
     let sharedBudgets: any[] = [];
     if (spaceIds.length > 0) {
       const { data, error } = await supabase
         .from('presupuestos')
         .select('presupuesto_id')
         .in('espacio_id', spaceIds);
-      if (error) {
-        throw new BadRequestError('DB_ERROR', 'No se pudieron validar presupuestos compartidos.');
-      }
+      if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron validar presupuestos compartidos.');
       sharedBudgets = data ?? [];
     }
 
     const ids = new Set<number>();
-    for (const row of ownBudgets ?? []) ids.add(Number(row.presupuesto_id));
+    for (const row of ownResult.data ?? []) ids.add(Number(row.presupuesto_id));
     for (const row of sharedBudgets) ids.add(Number(row.presupuesto_id));
 
     return Array.from(ids.values());
@@ -538,36 +555,18 @@ export class TransactionsService {
     for (const [walletId, delta] of adjustments.entries()) {
       if (Math.abs(delta) === 0) continue;
 
-      const { data: wallet, error: readError } = await supabase
-        .from('activos')
-        .select('activo_id, tipo, valor_actual')
-        .eq('activo_id', walletId)
-        .eq('usuario_id', userId)
-        .maybeSingle();
+      // Atomic adjustment via RPC — eliminates read-modify-write race condition.
+      // The RPC handles deudas inversion internally and updates actualizado_en.
+      const { error } = await supabase.rpc('adjust_wallet_balance', {
+        p_wallet_id: walletId,
+        p_user_id: userId,
+        p_delta: delta,
+      });
 
-      if (readError) {
-        throw new BadRequestError('DB_ERROR', 'No se pudo ajustar el balance de la cuenta.');
-      }
-      if (!wallet) {
-        throw new NotFoundError(
-          'NOT_FOUND_OR_FORBIDDEN',
-          'La cuenta indicada no existe o no pertenece al usuario.',
-        );
-      }
-
-      // Para wallets de deuda, valor_actual representa lo que se DEBE (siempre positivo).
-      // El flujo real es inverso: recibir dinero de una deuda AUMENTA lo que debes,
-      // y pagar una deuda REDUCE lo que debes. Por eso invertimos el delta.
-      const effectiveDelta = wallet.tipo === 'deudas' ? -delta : delta;
-      const nextBalance = Math.max(0, Number(wallet.valor_actual) + effectiveDelta);
-
-      const { error: writeError } = await supabase
-        .from('activos')
-        .update({ valor_actual: nextBalance, actualizado_en: new Date().toISOString() })
-        .eq('activo_id', walletId)
-        .eq('usuario_id', userId);
-
-      if (writeError) {
+      if (error) {
+        if (error.message?.includes('WALLET_NOT_FOUND')) {
+          throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'La cuenta indicada no existe o no pertenece al usuario.');
+        }
         throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el balance de la cuenta.');
       }
     }

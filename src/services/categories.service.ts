@@ -287,6 +287,19 @@ export class CategoriesService {
   async delete(userId: number, categoryId: number): Promise<void> {
     await this.getOwnedMutableCategory(userId, categoryId);
 
+    // Check for references in transactions or budgets before deleting
+    const [{ count: txCount }, { count: budgetCount }] = await Promise.all([
+      supabase.from('transacciones').select('transaccion_id', { count: 'exact', head: true }).eq('categoria_id', categoryId).limit(1),
+      supabase.from('presupuesto_categorias').select('presupuesto_id', { count: 'exact', head: true }).eq('categoria_id', categoryId).limit(1),
+    ]);
+
+    if ((txCount ?? 0) > 0) {
+      throw new ConflictError('CATEGORIA_CON_TRANSACCIONES', 'No se puede eliminar una categoría que tiene transacciones asociadas.');
+    }
+    if ((budgetCount ?? 0) > 0) {
+      throw new ConflictError('CATEGORIA_EN_PRESUPUESTO', 'No se puede eliminar una categoría que está en uso en un presupuesto.');
+    }
+
     const { error } = await supabase
       .from('categorias')
       .delete()

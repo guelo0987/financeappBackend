@@ -20,8 +20,10 @@ function parsePositiveInt(value: unknown, label: string): number {
 
 export async function listRecurring(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const data = await recurringService.getAll(requireUserId(req));
-    res.json({ data });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const result = await recurringService.getAll(requireUserId(req), page, limit);
+    res.json(result);
   } catch (error) {
     next(error);
   }

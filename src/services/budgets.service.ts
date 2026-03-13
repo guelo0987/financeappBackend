@@ -178,14 +178,10 @@ export class BudgetsService {
     await this.assertBudgetManageAccess(userId, budget);
 
     if (payload.categorias?.length) {
-      for (const item of payload.categorias) {
-        await this.ensureCategoryVisible(userId, item.categoriaId);
-      }
+      await Promise.all(payload.categorias.map((item) => this.ensureCategoryVisible(userId, item.categoriaId)));
     }
     if (payload.ingresos_detalle?.length) {
-      for (const item of payload.ingresos_detalle) {
-        await this.ensureCategoryVisible(userId, item.categoriaId);
-      }
+      await Promise.all(payload.ingresos_detalle.map((item) => this.ensureCategoryVisible(userId, item.categoriaId)));
     }
 
     if (payload.activo === true) {
@@ -399,6 +395,33 @@ export class BudgetsService {
     });
   }
 
+  async inviteMember(userId: number, budgetId: number, email: string) {
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+    await this.assertBudgetManageAccess(userId, budget);
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestError('VALIDACION_ERROR', 'El email es inválido.');
+    }
+
+    // Check current member count (max 4 = owner + 3)
+    if (budget.espacio_id) {
+      const { count } = await supabase
+        .from('espacio_miembros')
+        .select('usuario_id', { count: 'exact', head: true })
+        .eq('espacio_id', Number(budget.espacio_id));
+
+      if ((count ?? 0) >= 4) {
+        throw new BadRequestError('LIMITE_MIEMBROS', 'El presupuesto ya alcanzó el límite de 4 miembros.');
+      }
+    }
+
+    const espacioId = await this.ensureBudgetHasSpace(userId, budgetId, budget.nombre);
+    const { data: inviter } = await supabase.from('usuarios').select('nombre').eq('usuario_id', userId).single();
+    await this.sendInvitation(userId, budgetId, espacioId, email, inviter?.nombre ?? 'Alguien', budget.nombre);
+
+    return { invitado: email };
+  }
+
   async removeMember(userId: number, budgetId: number, targetUserId: number) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
     await this.assertBudgetManageAccess(userId, budget);
@@ -433,6 +456,16 @@ export class BudgetsService {
   }
 
   private async ensureBudgetHasSpace(userId: number, budgetId: number, budgetNombre: string): Promise<number> {
+    // If budget already has a space, reuse it
+    const { data: existing } = await supabase
+      .from('presupuestos')
+      .select('espacio_id')
+      .eq('presupuesto_id', budgetId)
+      .maybeSingle();
+
+    if (existing?.espacio_id) return Number(existing.espacio_id);
+
+    // Create new shared space
     const { data: space, error: spaceError } = await supabase
       .from('espacios_compartidos')
       .insert({ nombre: budgetNombre, creado_por: userId })
@@ -458,9 +491,7 @@ export class BudgetsService {
       dedupMap.set(item.categoriaId, item.limite);
     }
 
-    for (const categoriaId of dedupMap.keys()) {
-      await this.ensureCategoryVisible(userId, categoriaId);
-    }
+    await Promise.all(Array.from(dedupMap.keys()).map((id) => this.ensureCategoryVisible(userId, id)));
 
     const rows = Array.from(dedupMap.entries()).map(([categoriaId, limite]) => ({
       presupuesto_id: budgetId,
@@ -533,18 +564,33 @@ export class BudgetsService {
 
   private computeDateRange(budget: any) {
     const now = new Date();
-    const day = Number(budget.dia_inicio) || 1;
+    const todayDay = now.getUTCDate();
+    const day = Math.min(Number(budget.dia_inicio) || 1, 28);
     const currentYear = now.getUTCFullYear();
     const currentMonth = now.getUTCMonth();
 
     if (budget.periodo === 'mensual') {
-      const start = new Date(Date.UTC(currentYear, currentMonth, Math.min(day, 28)));
-      const end = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
+      // If dia_inicio is in the future this month, use the previous period
+      // e.g. dia_inicio=25, today=10 → period is 25th of last month to today's month end
+      let startYear = currentYear;
+      let startMonth = currentMonth;
+      if (day > todayDay) {
+        startMonth -= 1;
+        if (startMonth < 0) { startMonth = 11; startYear -= 1; }
+      }
+      const start = new Date(Date.UTC(startYear, startMonth, day));
+      const end = new Date(Date.UTC(startYear, startMonth + 1, day - 1));
       return { desde: this.isoDate(start), hasta: this.isoDate(end) };
     }
 
     if (budget.periodo === 'quincenal') {
-      const start = new Date(Date.UTC(currentYear, currentMonth, Math.min(day, 28)));
+      let startYear = currentYear;
+      let startMonth = currentMonth;
+      if (day > todayDay) {
+        startMonth -= 1;
+        if (startMonth < 0) { startMonth = 11; startYear -= 1; }
+      }
+      const start = new Date(Date.UTC(startYear, startMonth, day));
       const end = new Date(start);
       end.setUTCDate(end.getUTCDate() + 14);
       return { desde: this.isoDate(start), hasta: this.isoDate(end) };
@@ -679,9 +725,7 @@ export class BudgetsService {
       dedup.set(item.categoriaId, item.monto);
     }
 
-    for (const categoriaId of dedup.keys()) {
-      await this.ensureCategoryVisible(userId, categoriaId);
-    }
+    await Promise.all(Array.from(dedup.keys()).map((id) => this.ensureCategoryVisible(userId, id)));
 
     const rows = Array.from(dedup.entries()).map(([categoriaId, monto_planeado]) => ({
       presupuesto_id: budgetId,

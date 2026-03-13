@@ -1,4 +1,5 @@
 import express from 'express';
+import helmet from 'helmet';
 import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
@@ -14,26 +15,50 @@ import transactionsRoutes from './routes/transactions.routes';
 import walletsRoutes from './routes/wallets.routes';
 import { corsMiddleware } from './middleware/cors.middleware';
 import { errorHandler } from './middleware/error.middleware';
+import { globalLimiter, authLimiter, emailLimiter } from './middleware/rate-limit.middleware';
+import { getSupabaseClient } from './config/supabase';
 
 const app = express();
 const openapiPath = path.resolve(process.cwd(), 'docs/openapi.yaml');
 const openapiDocument = YAML.load(openapiPath);
 
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // needed for invitation page inline script
+      styleSrc: ["'self'", "'unsafe-inline'"],
+    },
+  },
+}));
+
 app.use(corsMiddleware);
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+app.use(globalLimiter);
+
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiDocument));
 
-app.get('/health', (_req, res) => {
-  res.json({ data: { status: 'ok' } });
+app.get('/health', async (_req, res) => {
+  try {
+    const supabase: any = getSupabaseClient();
+    const { error } = await supabase.from('usuarios').select('usuario_id').limit(1);
+    if (error) throw error;
+    res.json({ data: { status: 'ok', db: 'connected' } });
+  } catch {
+    res.status(503).json({ data: { status: 'degraded', db: 'unreachable' } });
+  }
 });
 
+// Auth routes with stricter rate limit
+app.use('/auth', authLimiter, authRoutes);
+
 app.use('/alerts', alertsRoutes);
-app.use('/auth', authRoutes);
 app.use('/budgets', budgetsRoutes);
 app.use('/categories', categoriesRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/insights', insightsRoutes);
-app.use('/invitations', invitationsRoutes);
+app.use('/invitations', emailLimiter, invitationsRoutes);
 app.use('/recurring', recurringRoutes);
 app.use('/wallets', walletsRoutes);
 app.use('/transactions', transactionsRoutes);

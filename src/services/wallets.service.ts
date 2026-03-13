@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { getSupabaseClient } from '../config/supabase';
-import { BadRequestError, NotFoundError } from '../utils/errors';
+import { BadRequestError, ConflictError, NotFoundError } from '../utils/errors';
 import { CreateWalletDTO, UpdateWalletDTO } from '../types/wallets.types';
 
 const supabase: any = getSupabaseClient();
@@ -136,6 +136,21 @@ export class WalletsService {
 
   async softDelete(userId: number, walletId: number): Promise<void> {
     await this.getOwnedWallet(userId, walletId);
+
+    // Check if wallet has associated transactions before deleting
+    const { count, error: countError } = await supabase
+      .from('transacciones')
+      .select('transaccion_id', { count: 'exact', head: true })
+      .or(`activo_id.eq.${walletId},activo_destino_id.eq.${walletId}`)
+      .limit(1);
+
+    if (countError) throw new BadRequestError('DB_ERROR', 'No se pudo verificar transacciones de la cuenta.');
+    if ((count ?? 0) > 0) {
+      throw new ConflictError(
+        'CUENTA_CON_TRANSACCIONES',
+        'No se puede eliminar una cuenta con transacciones registradas.',
+      );
+    }
 
     const { error } = await supabase
       .from('activos')

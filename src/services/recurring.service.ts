@@ -34,18 +34,31 @@ const updateSchema = z.object({
 });
 
 export class RecurringService {
-  async getAll(userId: number) {
-    const { data, error } = await supabase
+  async getAll(userId: number, page = 1, limit = 50) {
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.max(1, Math.min(100, limit));
+    const from = (safePage - 1) * safeLimit;
+    const to = from + safeLimit - 1;
+
+    const { data, error, count } = await supabase
       .from('transacciones_recurrentes')
       .select(
         'recurrente_id, usuario_id, presupuesto_id, activo_id, categoria_id, tipo, monto, moneda, descripcion, nota, frecuencia, dia_ejecucion, activo, proxima_ejecucion, creado_en, actualizado_en, categorias(slug, nombre, icono)',
+        { count: 'exact' },
       )
       .eq('usuario_id', userId)
       .order('activo', { ascending: false })
-      .order('creado_en', { ascending: false });
+      .order('creado_en', { ascending: false })
+      .range(from, to);
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar las transacciones recurrentes.');
-    return (data ?? []).map((row: any) => this.mapRecurring(row));
+
+    const total = count ?? 0;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / safeLimit);
+    return {
+      data: (data ?? []).map((row: any) => this.mapRecurring(row)),
+      meta: { page: safePage, limit: safeLimit, total, totalPages, hasMore: safePage < totalPages },
+    };
   }
 
   async create(userId: number, dto: CreateRecurringDTO) {
@@ -185,7 +198,30 @@ export class RecurringService {
     for (const rec of data ?? []) {
       try {
         if (!this.isDueToday(rec, today)) continue;
+
+        // Skip transferencias — not supported for recurring (no destination wallet)
+        if (rec.tipo === 'transferencia') {
+          console.error(JSON.stringify({ level: 'warn', msg: '[recurring] skipping transferencia', recurrente_id: rec.recurrente_id }));
+          continue;
+        }
+
         const budget = await this.getAccessibleBudget(Number(rec.usuario_id), Number(rec.presupuesto_id));
+
+        // Idempotency guard: advance proxima_ejecucion FIRST to prevent duplicate execution
+        // on concurrent/retry runs. If transaction insert later fails, the recurring is
+        // skipped until the next scheduled period (safe outcome, no duplicates).
+        const nextDate = this.computeNextExecutionDate(rec.frecuencia, Number(rec.dia_ejecucion), today);
+        const { error: advanceError } = await supabase
+          .from('transacciones_recurrentes')
+          .update({ proxima_ejecucion: nextDate, actualizado_en: new Date().toISOString() })
+          .eq('recurrente_id', rec.recurrente_id)
+          .eq('proxima_ejecucion', rec.proxima_ejecucion); // optimistic lock: only update if unchanged
+
+        if (advanceError) {
+          console.error(JSON.stringify({ level: 'error', msg: '[recurring] advance error', recurrente_id: rec.recurrente_id, error: advanceError.message }));
+          errors += 1;
+          continue;
+        }
 
         const { error: insertError } = await supabase.from('transacciones').insert({
           usuario_id: rec.usuario_id,
@@ -204,35 +240,20 @@ export class RecurringService {
         });
 
         if (insertError) {
-          console.error(`[recurring] Insert error recurrente_id=${rec.recurrente_id}:`, insertError);
+          console.error(JSON.stringify({ level: 'error', msg: '[recurring] insert error', recurrente_id: rec.recurrente_id, error: insertError.message }));
           errors += 1;
           continue;
         }
 
+        // Atomic wallet adjustment via RPC
         if (rec.activo_id) {
-          const delta = rec.tipo === 'ingreso' ? Number(rec.monto) : rec.tipo === 'gasto' ? -Number(rec.monto) : 0;
-          if (delta !== 0) {
-            await this.applyWalletAdjustment(Number(rec.usuario_id), Number(rec.activo_id), delta);
-          }
-        }
-
-        const nextDate = this.computeNextExecutionDate(rec.frecuencia, Number(rec.dia_ejecucion), today);
-        const { error: updateError } = await supabase
-          .from('transacciones_recurrentes')
-          .update({
-            proxima_ejecucion: nextDate,
-            actualizado_en: new Date().toISOString(),
-          })
-          .eq('recurrente_id', rec.recurrente_id);
-
-        if (updateError) {
-          errors += 1;
-          continue;
+          const delta = rec.tipo === 'ingreso' ? Number(rec.monto) : -Number(rec.monto);
+          await this.applyWalletAdjustment(Number(rec.usuario_id), Number(rec.activo_id), delta);
         }
 
         processed += 1;
       } catch (err) {
-        console.error(`[recurring] Exception recurrente_id=${rec.recurrente_id}:`, err);
+        console.error(JSON.stringify({ level: 'error', msg: '[recurring] exception', recurrente_id: rec.recurrente_id, error: String(err) }));
         errors += 1;
       }
     }
@@ -442,32 +463,13 @@ export class RecurringService {
   }
 
   private async applyWalletAdjustment(userId: number, walletId: number, delta: number): Promise<void> {
-    const { data: wallet, error: readError } = await supabase
-      .from('activos')
-      .select('activo_id, tipo, valor_actual')
-      .eq('activo_id', walletId)
-      .eq('usuario_id', userId)
-      .maybeSingle();
+    const { error } = await supabase.rpc('adjust_wallet_balance', {
+      p_wallet_id: walletId,
+      p_user_id: userId,
+      p_delta: delta,
+    });
 
-    if (readError) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo ajustar el balance de la cuenta.');
-    }
-    if (!wallet) {
-      throw new NotFoundError('NOT_FOUND', 'Cuenta no encontrada para aplicar recurrente.');
-    }
-
-    // Para wallets de deuda el delta se invierte: un ingreso reduce lo que debes,
-    // un gasto aumenta lo que debes.
-    const effectiveDelta = wallet.tipo === 'deudas' ? -delta : delta;
-    const nextBalance = Math.max(0, Number(wallet.valor_actual) + effectiveDelta);
-
-    const { error: writeError } = await supabase
-      .from('activos')
-      .update({ valor_actual: nextBalance, actualizado_en: new Date().toISOString() })
-      .eq('activo_id', walletId)
-      .eq('usuario_id', userId);
-
-    if (writeError) {
+    if (error) {
       throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el balance de la cuenta.');
     }
   }

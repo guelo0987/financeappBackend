@@ -21,8 +21,10 @@ function parsePositiveInt(value: unknown, label: string): number {
 export async function getAlerts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const soloNoLeidas = req.query.no_leidas === 'true';
-    const data = await alertsService.getAll(requireUserId(req), soloNoLeidas);
-    res.json({ data });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+    const result = await alertsService.getAll(requireUserId(req), soloNoLeidas, page, limit);
+    res.json(result);
   } catch (error) {
     next(error);
   }

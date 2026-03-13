@@ -155,11 +155,15 @@ export class InsightsService {
 
   async getLargestTransactions(userId: number, limit: number) {
     const safeLimit = Math.max(1, Math.min(50, limit));
+    // Limit to last 6 months to avoid full-table scans on large histories
+    const since = new Date();
+    since.setUTCMonth(since.getUTCMonth() - 6);
     const { data, error } = await supabase
       .from('transacciones')
       .select('transaccion_id, tipo, monto, moneda, descripcion, fecha, categoria_id, categorias(slug, nombre, icono)')
       .eq('usuario_id', userId)
       .eq('tipo', 'gasto')
+      .gte('fecha', this.isoDate(since))
       .order('monto', { ascending: false })
       .limit(safeLimit);
 
@@ -182,11 +186,15 @@ export class InsightsService {
   }
 
   async getSpendingByDayOfWeek(userId: number) {
+    // Limit to last 90 days to avoid loading all history into memory
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - 90);
     const { data, error } = await supabase
       .from('transacciones')
       .select('fecha, monto')
       .eq('usuario_id', userId)
-      .eq('tipo', 'gasto');
+      .eq('tipo', 'gasto')
+      .gte('fecha', this.isoDate(since));
 
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo calcular patrón por día.');
 
@@ -282,37 +290,60 @@ export class InsightsService {
   private async getOwnedBudget(userId: number, budgetId: number) {
     const { data, error } = await supabase
       .from('presupuestos')
-      .select('presupuesto_id, usuario_id, periodo, dia_inicio, ingresos, creado_en')
+      .select('presupuesto_id, usuario_id, espacio_id, periodo, dia_inicio, ingresos, creado_en')
       .eq('presupuesto_id', budgetId)
-      .eq('usuario_id', userId)
       .maybeSingle();
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo validar presupuesto.');
     if (!data) throw new NotFoundError('NOT_FOUND', 'Presupuesto no encontrado.');
-    return data;
+
+    // Allow owner or space members to view insights
+    if (Number(data.usuario_id) === userId) return data;
+    if (data.espacio_id) {
+      const { data: member } = await supabase
+        .from('espacio_miembros')
+        .select('usuario_id')
+        .eq('espacio_id', Number(data.espacio_id))
+        .eq('usuario_id', userId)
+        .maybeSingle();
+      if (member) return data;
+    }
+    throw new NotFoundError('NOT_FOUND', 'Presupuesto no encontrado.');
   }
 
   private computeBudgetRange(budget: any) {
     const now = new Date();
+    const todayDay = now.getUTCDate();
     const year = now.getUTCFullYear();
     const month = now.getUTCMonth();
     const day = Math.min(Number(budget.dia_inicio) || 1, 28);
 
     if (budget.periodo === 'mensual') {
-      const start = new Date(Date.UTC(year, month, day));
-      const end = new Date(Date.UTC(year, month + 1, 0));
+      let startYear = year;
+      let startMonth = month;
+      if (day > todayDay) {
+        startMonth -= 1;
+        if (startMonth < 0) { startMonth = 11; startYear -= 1; }
+      }
+      const start = new Date(Date.UTC(startYear, startMonth, day));
+      const end = new Date(Date.UTC(startYear, startMonth + 1, day - 1));
       return { desde: this.isoDate(start), hasta: this.isoDate(end) };
     }
     if (budget.periodo === 'quincenal') {
-      const start = new Date(Date.UTC(year, month, day));
+      let startYear = year;
+      let startMonth = month;
+      if (day > todayDay) {
+        startMonth -= 1;
+        if (startMonth < 0) { startMonth = 11; startYear -= 1; }
+      }
+      const start = new Date(Date.UTC(startYear, startMonth, day));
       const end = new Date(start);
       end.setUTCDate(end.getUTCDate() + 14);
       return { desde: this.isoDate(start), hasta: this.isoDate(end) };
     }
     if (budget.periodo === 'semanal') {
-      const end = new Date(now);
       const start = new Date(now);
-      start.setUTCDate(end.getUTCDate() - 6);
-      return { desde: this.isoDate(start), hasta: this.isoDate(end) };
+      start.setUTCDate(now.getUTCDate() - 6);
+      return { desde: this.isoDate(start), hasta: this.isoDate(now) };
     }
     const created = new Date(budget.creado_en);
     return { desde: this.isoDate(created), hasta: this.isoDate(now) };

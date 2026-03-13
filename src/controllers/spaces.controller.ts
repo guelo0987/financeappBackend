@@ -27,19 +27,6 @@ export async function listSpaces(req: Request, res: Response, next: NextFunction
   }
 }
 
-export async function createSpace(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const data = await spacesService.createSpace(
-      requireUserId(req),
-      String(req.body.nombre ?? ''),
-      req.body.descripcion ?? null,
-    );
-    res.status(201).json({ data });
-  } catch (error) {
-    next(error);
-  }
-}
-
 export async function getSpace(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = await spacesService.getSpace(requireUserId(req), parsePositiveInt(req.params.id, 'spaceId'));
@@ -53,19 +40,6 @@ export async function deleteSpace(req: Request, res: Response, next: NextFunctio
   try {
     await spacesService.deleteSpace(requireUserId(req), parsePositiveInt(req.params.id, 'spaceId'));
     res.json({ data: { eliminado: true } });
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function inviteMember(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const data = await spacesService.inviteMember(
-      requireUserId(req),
-      parsePositiveInt(req.params.id, 'spaceId'),
-      String(req.body.email ?? ''),
-    );
-    res.status(201).json({ data });
   } catch (error) {
     next(error);
   }
@@ -129,9 +103,18 @@ export async function cancelInvitation(req: Request, res: Response, next: NextFu
   }
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function acceptInvitationPage(req: Request, res: Response): Promise<void> {
-  const token = String(req.params.token ?? '');
-  const email = String(req.query.email ?? '');
+  const token = escapeHtml(String(req.params.token ?? ''));
+  const email = escapeHtml(String(req.query.email ?? ''));
   res.send(`<!DOCTYPE html>
 <html lang="es">
 <head>
