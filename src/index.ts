@@ -1,6 +1,7 @@
 import { app } from './app';
 import { env } from './config/env';
 import { startRecurringJob } from './jobs/recurring.job';
+import { startHistoryJob } from './jobs/history.job';
 
 // BigInt JSON serialization
 (BigInt.prototype as any).toJSON = function () {
@@ -17,6 +18,7 @@ const log = {
 const server = app.listen(env.PORT, () => {
   log.info('Server started', { port: env.PORT, env: env.NODE_ENV });
   startRecurringJob();
+  startHistoryJob();
 });
 
 function shutdown(signal: string) {

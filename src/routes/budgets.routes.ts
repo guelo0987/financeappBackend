@@ -15,6 +15,7 @@ import {
   updateBudget,
   updateBudgetCategory,
 } from '../controllers/budgets.controller';
+import { getBudgetHistory } from '../controllers/history.controller';
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.put('/:id', updateBudget);
 router.delete('/:id', deleteBudget);
 router.patch('/:id/activate', activateBudget);
 router.get('/:id/spending', getBudgetSpending);
+router.get('/:id/history', getBudgetHistory);
 router.get('/:id/members', listBudgetMembers);
 router.post('/:id/invite', inviteBudgetMember);
 router.delete('/:id/members/:userId', removeBudgetMember);
