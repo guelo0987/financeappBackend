@@ -12,6 +12,7 @@ import dashboardRoutes from './routes/dashboard.routes';
 import insightsRoutes from './routes/insights.routes';
 import invitationsRoutes from './routes/invitations.routes';
 import recurringRoutes from './routes/recurring.routes';
+import subscriptionsRoutes from './routes/subscriptions.routes';
 import transactionsRoutes from './routes/transactions.routes';
 import walletsRoutes from './routes/wallets.routes';
 import { corsMiddleware } from './middleware/cors.middleware';
@@ -22,6 +23,9 @@ import { getSupabaseClient } from './config/supabase';
 const app = express();
 const openapiPath = path.resolve(process.cwd(), 'docs/openapi.yaml');
 const openapiDocument = YAML.load(openapiPath);
+
+// Trust first proxy (Cloudflare tunnel, Railway, etc.)
+app.set('trust proxy', 1);
 
 // Security headers
 app.use(helmet({
@@ -66,6 +70,7 @@ app.use('/dashboard', dashboardRoutes);
 app.use('/insights', insightsRoutes);
 app.use('/invitations', emailLimiter, invitationsRoutes);
 app.use('/recurring', recurringRoutes);
+app.use('/subscriptions', subscriptionsRoutes);
 app.use('/wallets', walletsRoutes);
 app.use('/transactions', transactionsRoutes);
 
