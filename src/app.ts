@@ -4,6 +4,7 @@ import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import alertsRoutes from './routes/alerts.routes';
+import webhooksRoutes from './routes/webhooks.routes';
 import authRoutes from './routes/auth.routes';
 import budgetsRoutes from './routes/budgets.routes';
 import categoriesRoutes from './routes/categories.routes';
@@ -34,6 +35,11 @@ app.use(helmet({
 }));
 
 app.use(corsMiddleware);
+
+// Webhooks need raw body before JSON parsing for signature verification
+app.use('/webhooks', express.raw({ type: 'application/json', limit: '100kb' }));
+app.use('/webhooks', webhooksRoutes);
+
 app.use(express.json({ limit: '100kb' }));
 app.use(globalLimiter);
 

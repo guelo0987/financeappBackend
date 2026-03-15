@@ -15,6 +15,7 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY es requerido'),
   EMAIL_FROM: z.string().email('EMAIL_FROM debe ser un email válido'),
   APP_URL: z.string().url().default('http://localhost:3000'),
+  REVENUECAT_WEBHOOK_SECRET: z.string().min(1, 'REVENUECAT_WEBHOOK_SECRET es requerido').optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
