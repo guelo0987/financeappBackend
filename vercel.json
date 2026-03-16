@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/api/index.ts" }
+  ],
+  "crons": [
+    {
+      "path": "/cron/recurring",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/cron/history",
+      "schedule": "30 6 * * *"
+    }
+  ]
+}

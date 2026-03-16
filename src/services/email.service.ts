@@ -5,7 +5,10 @@ const resend = new Resend(env.RESEND_API_KEY);
 
 export class EmailService {
   async sendBudgetInvitation(toEmail: string, inviterName: string, budgetName: string, token: string) {
-    const inviteLink = `${env.APP_URL}/invitations/${token}/accept?email=${encodeURIComponent(toEmail)}`;
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000';
+    const inviteLink = `${baseUrl}/invitations/${token}/accept?email=${encodeURIComponent(toEmail)}`;
 
     const { data, error } = await resend.emails.send({
       from: env.EMAIL_FROM,

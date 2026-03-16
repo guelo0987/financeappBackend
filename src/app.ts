@@ -1,8 +1,5 @@
 import express from 'express';
 import helmet from 'helmet';
-import path from 'path';
-import swaggerUi from 'swagger-ui-express';
-import YAML from 'yamljs';
 import alertsRoutes from './routes/alerts.routes';
 import webhooksRoutes from './routes/webhooks.routes';
 import authRoutes from './routes/auth.routes';
@@ -15,16 +12,14 @@ import recurringRoutes from './routes/recurring.routes';
 import subscriptionsRoutes from './routes/subscriptions.routes';
 import transactionsRoutes from './routes/transactions.routes';
 import walletsRoutes from './routes/wallets.routes';
-import { corsMiddleware } from './middleware/cors.middleware';
+import cronRoutes from './routes/cron.routes';
 import { errorHandler } from './middleware/error.middleware';
 import { globalLimiter, authLimiter, emailLimiter } from './middleware/rate-limit.middleware';
 import { getSupabaseClient } from './config/supabase';
 
 const app = express();
-const openapiPath = path.resolve(process.cwd(), 'docs/openapi.yaml');
-const openapiDocument = YAML.load(openapiPath);
 
-// Trust first proxy (Cloudflare tunnel, Railway, etc.)
+// Trust first proxy (Vercel, Cloudflare, etc.)
 app.set('trust proxy', 1);
 
 // Security headers
@@ -32,13 +27,20 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"], // needed for invitation page inline script
+      scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
     },
   },
 }));
 
-app.use(corsMiddleware);
+// Mobile API — allow all origins (iOS app doesn't send Origin header)
+app.use((_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  if (_req.method === 'OPTIONS') { res.status(204).end(); return; }
+  next();
+});
 
 // Webhooks need raw body before JSON parsing for signature verification
 app.use('/webhooks', express.raw({ type: 'application/json', limit: '100kb' }));
@@ -46,8 +48,6 @@ app.use('/webhooks', webhooksRoutes);
 
 app.use(express.json({ limit: '100kb' }));
 app.use(globalLimiter);
-
-app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiDocument));
 
 app.get('/health', async (_req, res) => {
   try {
@@ -66,6 +66,7 @@ app.use('/auth', authLimiter, authRoutes);
 app.use('/alerts', alertsRoutes);
 app.use('/budgets', budgetsRoutes);
 app.use('/categories', categoriesRoutes);
+app.use('/cron', cronRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/insights', insightsRoutes);
 app.use('/invitations', emailLimiter, invitationsRoutes);

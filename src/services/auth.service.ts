@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { getSupabaseClient } from '../config/supabase';
 import { env } from '../config/env';
 import { generarAccessToken, generarRefreshToken, verificarToken } from '../utils/jwt';
