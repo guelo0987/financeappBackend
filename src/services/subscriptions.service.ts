@@ -305,8 +305,10 @@ export class SubscriptionsService {
 
     const isActive = trialActive || subActive || cancelledActive;
 
-    // Auto-corregir: si no tiene acceso y el estado no es 'vencida', actualizar BD
-    if (!isActive && data.estado !== 'vencida') {
+    // Auto-corregir: si no tiene acceso, estado no es 'vencida',
+    // y NO es un usuario recién registrado esperando paywall (prueba + trial_fin=null)
+    const isPendingPaywall = data.estado === 'prueba' && data.trial_fin == null;
+    if (!isActive && data.estado !== 'vencida' && !isPendingPaywall) {
       await supabase
         .from('suscripciones')
         .update({ estado: 'vencida', actualizado_en: now.toISOString() })
