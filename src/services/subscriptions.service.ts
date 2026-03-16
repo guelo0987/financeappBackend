@@ -303,10 +303,21 @@ export class SubscriptionsService {
       (data.periodo_fin != null && new Date(data.periodo_fin) > now)
     );
 
+    const isActive = trialActive || subActive || cancelledActive;
+
+    // Auto-corregir: si no tiene acceso y el estado no es 'vencida', actualizar BD
+    if (!isActive && data.estado !== 'vencida') {
+      await supabase
+        .from('suscripciones')
+        .update({ estado: 'vencida', actualizado_en: now.toISOString() })
+        .eq('usuario_id', userId);
+      data.estado = 'vencida';
+    }
+
     return {
       estado: data.estado,
       plan: data.plan ?? 'mensual',
-      isActive: trialActive || subActive || cancelledActive,
+      isActive,
       trial_fin: data.trial_fin,
       periodo_fin: data.periodo_fin,
       cancelado_en: data.cancelado_en,
@@ -317,17 +328,28 @@ export class SubscriptionsService {
 
   async expireTrials(): Promise<{ expired: number }> {
     const now = new Date().toISOString();
-    const { data, error } = await supabase
+
+    // Expirar trials vencidos
+    const { data: trials, error: e1 } = await supabase
       .from('suscripciones')
-      .update({
-        estado: 'vencida',
-        actualizado_en: now,
-      })
+      .update({ estado: 'vencida', actualizado_en: now })
       .eq('estado', 'prueba')
       .lt('trial_fin', now)
       .select('suscripcion_id');
 
-    if (error) throw new BadRequestError('DB_ERROR', 'Error al expirar trials.');
-    return { expired: (data ?? []).length };
+    if (e1) console.error('[cron] Error expirando trials:', e1);
+
+    // Expirar suscripciones activas/canceladas cuyo periodo ya pasó
+    const { data: subs, error: e2 } = await supabase
+      .from('suscripciones')
+      .update({ estado: 'vencida', actualizado_en: now })
+      .in('estado', ['activa', 'cancelada'])
+      .not('periodo_fin', 'is', null)
+      .lt('periodo_fin', now)
+      .select('suscripcion_id');
+
+    if (e2) console.error('[cron] Error expirando suscripciones:', e2);
+
+    return { expired: ((trials ?? []).length) + ((subs ?? []).length) };
   }
 }
