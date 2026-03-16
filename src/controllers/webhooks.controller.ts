@@ -23,10 +23,7 @@ export async function revenueCatWebhook(
       }
     }
 
-    // Acknowledge immediately — RC retries if no 2xx within 5s
-    res.status(200).json({ received: true });
-
-    // Process asynchronously after responding
+    // Parse body
     const raw = req.body;
     const body = Buffer.isBuffer(raw)
       ? JSON.parse(raw.toString('utf-8'))
@@ -37,13 +34,17 @@ export async function revenueCatWebhook(
 
     if (!event) {
       console.warn('[webhook/revenuecat] Payload sin evento');
+      res.status(200).json({ received: true });
       return;
     }
 
+    // Process BEFORE responding (Vercel kills function after response)
     console.log(`[webhook/revenuecat] Procesando evento: ${event.type} | user: ${event.app_user_id}`);
     await subscriptionsService.handleWebhookEvent(event);
+
+    res.status(200).json({ received: true });
   } catch (error) {
     console.error('[webhook/revenuecat] Error:', error);
-    // Don't call next(error) — we already responded 200 to RC
+    res.status(200).json({ received: true });
   }
 }
