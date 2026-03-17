@@ -277,6 +277,13 @@ export class SubscriptionsService {
     periodo_fin: string | null;
     cancelado_en: string | null;
   }> {
+    // Check if user is beta
+    const { data: usuario } = await supabase
+      .from('usuarios')
+      .select('usuario_beta')
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
     const { data } = await supabase
       .from('suscripciones')
       .select('estado, plan, trial_fin, periodo_fin, cancelado_en')
@@ -284,7 +291,18 @@ export class SubscriptionsService {
       .maybeSingle();
 
     const empty = { estado: 'vencida', plan: 'mensual', isActive: false, trial_fin: null, periodo_fin: null, cancelado_en: null };
-    if (!data) return empty;
+    if (!data) return usuario?.usuario_beta ? { ...empty, estado: 'activa', isActive: true } : empty;
+
+    if (usuario?.usuario_beta) {
+      return {
+        estado: data.estado,
+        plan: data.plan ?? 'mensual',
+        isActive: true,
+        trial_fin: data.trial_fin,
+        periodo_fin: data.periodo_fin,
+        cancelado_en: data.cancelado_en,
+      };
+    }
 
     const now = new Date();
 
