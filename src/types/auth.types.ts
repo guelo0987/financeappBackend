@@ -1,19 +1,3 @@
-export interface RegisterDTO {
-  nombre: string;
-  email: string;
-  password: string;
-  moneda_base?: 'DOP' | 'USD';
-}
-
-export interface LoginDTO {
-  email: string;
-  password: string;
-}
-
-export interface RefreshDTO {
-  refreshToken: string;
-}
-
 export interface UpdateProfileDTO {
   nombre?: string;
   moneda_base?: 'DOP' | 'USD';
@@ -22,28 +6,13 @@ export interface UpdateProfileDTO {
   meta_fecha?: string | null;
 }
 
-export interface ChangePasswordDTO {
-  currentPassword: string;
-  newPassword: string;
+export interface SupabaseSessionDTO {
+  moneda_base?: 'DOP' | 'USD';
 }
 
-export interface JwtPayload {
-  sub: number;
-  email: string;
-  type: 'access' | 'refresh';
-}
-
-export interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
-}
-
-export interface AuthResponse extends TokenPair {
+export interface AuthSessionResponse {
   usuario: UsuarioPublico;
-}
-
-export interface LoginResponse extends AuthResponse {
-  suscripcion: SuscripcionResumen | null;
+  isNewUser: boolean;
 }
 
 export interface UsuarioPublico {

@@ -13,7 +13,7 @@ model usuarios {
   usuario_id                BigInt                      @id @default(autoincrement())
   nombre                    String
   email                     String
-  password_hash             String
+  supabase_auth_user_id     String?                     @unique @db.Uuid
   moneda_base               String                      @default("DOP")
   meta_financiera           String?
   meta_monto                Decimal?                    @db.Decimal(15, 2)

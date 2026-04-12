@@ -7,7 +7,7 @@ export interface CreateTransactionDTO {
   monto: number;
   tipo: TipoTransaccion;
   budgetId: number;
-  catKey: string;
+  catKey?: string | null;
   walletId: number;
   toWalletId?: number;
   nota?: string;
@@ -20,7 +20,7 @@ export interface UpdateTransactionDTO {
   monto?: number;
   tipo?: TipoTransaccion;
   budgetId?: number;
-  catKey?: string;
+  catKey?: string | null;
   walletId?: number;
   toWalletId?: number | null;
   nota?: string | null;

@@ -1,7 +1,5 @@
-import bcrypt from 'bcryptjs';
+import { User } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../config/supabase';
-import { env } from '../config/env';
-import { generarAccessToken, generarRefreshToken, verificarToken } from '../utils/jwt';
 import {
   BadRequestError,
   ConflictError,
@@ -9,225 +7,71 @@ import {
   UnauthorizedError,
 } from '../utils/errors';
 import {
-  AuthResponse,
-  ChangePasswordDTO,
-  LoginDTO,
-  LoginResponse,
-  RefreshDTO,
-  RegisterDTO,
+  AuthSessionResponse,
+  SupabaseSessionDTO,
   UpdateProfileDTO,
   UsuarioPublico,
 } from '../types/auth.types';
 
-const SALT_ROUNDS = env.BCRYPT_ROUNDS;
 const supabase: any = getSupabaseClient();
 
+type SyncResult = {
+  isNewUser: boolean;
+  userId: number;
+  usuario: UsuarioPublico;
+};
+
 export class AuthService {
-  async register(dto: RegisterDTO): Promise<AuthResponse> {
-    this.validarRegistro(dto);
+  async verifySupabaseToken(accessToken: string): Promise<User> {
+    const token = accessToken.trim();
+    if (!token) {
+      throw new UnauthorizedError('TOKEN_REQUERIDO', 'Se requiere un token de autenticación.');
+    }
 
-    const emailNormalizado = dto.email.toLowerCase().trim();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
 
-    const { data: existente, error: errorExistente } = await supabase
+    if (error || !user) {
+      throw new UnauthorizedError('TOKEN_INVALIDO', 'El token de Supabase es inválido o ha expirado.');
+    }
+
+    if (!user.email) {
+      throw new UnauthorizedError('EMAIL_REQUERIDO', 'La cuenta autenticada no tiene un email disponible.');
+    }
+
+    return user;
+  }
+
+  async getUserIdBySupabaseAuthUserId(supabaseAuthUserId: string): Promise<number | null> {
+    const { data, error } = await supabase
       .from('usuarios')
       .select('usuario_id')
-      .eq('email', emailNormalizado)
-      .maybeSingle();
-
-    if (errorExistente) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo validar el email.');
-    }
-
-    if (existente) {
-      throw new ConflictError('EMAIL_EXISTENTE', 'Ya existe una cuenta con este email.');
-    }
-
-    const password_hash = await bcrypt.hash(dto.password, SALT_ROUNDS);
-
-    const { data: usuario, error: errorUsuario } = await supabase
-      .from('usuarios')
-      .insert({
-        nombre: dto.nombre.trim(),
-        email: emailNormalizado,
-        password_hash,
-        moneda_base: dto.moneda_base ?? 'DOP',
-      })
-      .select(
-        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
-      )
-      .single();
-
-    if (errorUsuario || !usuario) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo crear el usuario.');
-    }
-
-    const { error: errorSuscripcion } = await supabase.from('suscripciones').insert({
-      usuario_id: usuario.usuario_id,
-      estado: 'prueba',
-      plan: 'mensual',
-    });
-
-    if (errorSuscripcion) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo crear la suscripción inicial.');
-    }
-
-    const { error: errorBudget } = await supabase.from('presupuestos').insert({
-      usuario_id: usuario.usuario_id,
-      nombre: 'Predeterminado',
-      periodo: 'mensual',
-      dia_inicio: 1,
-      ingresos: 0,
-      ahorro_objetivo: 0,
-      activo: true,
-      espacio_id: null,
-    });
-
-    if (errorBudget) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo crear el presupuesto predeterminado.');
-    }
-
-    const userId = Number(usuario.usuario_id);
-
-    // Auto-accept any pending invitations for this email
-    await this.acceptPendingInvitations(userId, emailNormalizado);
-
-    return {
-      usuario: this.mapUsuarioPublico(usuario),
-      accessToken: generarAccessToken(userId, usuario.email),
-      refreshToken: generarRefreshToken(userId, usuario.email),
-    };
-  }
-
-  private async acceptPendingInvitations(userId: number, email: string): Promise<void> {
-    const now = new Date().toISOString();
-
-    const { data: invitations } = await supabase
-      .from('espacio_invitaciones')
-      .select('invitacion_id, espacio_id, espacios_compartidos(nombre)')
-      .eq('email_invitado', email)
-      .eq('estado', 'pendiente')
-      .gte('expira_en', now);
-
-    if (!invitations?.length) return;
-
-    for (const inv of invitations) {
-      const espacioNombre = Array.isArray(inv.espacios_compartidos)
-        ? inv.espacios_compartidos[0]?.nombre
-        : inv.espacios_compartidos?.nombre;
-
-      // Fetch the budget linked to this space for deep-link support
-      const { data: presupuesto } = await supabase
-        .from('presupuestos')
-        .select('presupuesto_id')
-        .eq('espacio_id', inv.espacio_id)
-        .maybeSingle();
-
-      // Add as member
-      await supabase.from('espacio_miembros').insert({
-        espacio_id: inv.espacio_id,
-        usuario_id: userId,
-        rol: 'miembro',
-      });
-
-      // Mark invitation as accepted
-      await supabase
-        .from('espacio_invitaciones')
-        .update({ estado: 'aceptada' })
-        .eq('invitacion_id', inv.invitacion_id);
-
-      // Create alert so user sees it on first login
-      const { error: alertError } = await supabase.from('alertas').insert({
-        usuario_id: userId,
-        tipo: 'invitacion_aceptada',
-        titulo: 'Te uniste a un presupuesto compartido',
-        cuerpo: `Ahora eres miembro del presupuesto "${espacioNombre ?? 'compartido'}". Ya puedes ver y registrar transacciones.`,
-        datos_extra: {
-          espacio_id: inv.espacio_id,
-          presupuesto_id: presupuesto ? Number(presupuesto.presupuesto_id) : null,
-          budget_nombre: espacioNombre ?? null,
-        },
-        espacio_id: inv.espacio_id,
-      });
-      if (alertError) console.error('Error creando alerta de invitación aceptada:', alertError);
-    }
-  }
-
-  async login(dto: LoginDTO): Promise<LoginResponse> {
-    if (!dto.email || !dto.password) {
-      throw new BadRequestError('CAMPOS_REQUERIDOS', 'Los campos email y password son obligatorios.');
-    }
-
-    const emailNormalizado = dto.email.toLowerCase().trim();
-
-    const { data: usuario, error } = await supabase
-      .from('usuarios')
-      .select(
-        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, password_hash, suscripciones(estado, plan, trial_fin, periodo_fin)',
-      )
-      .eq('email', emailNormalizado)
+      .eq('supabase_auth_user_id', supabaseAuthUserId)
       .maybeSingle();
 
     if (error) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo realizar el inicio de sesión.');
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar el usuario autenticado.');
     }
 
-    if (!usuario) {
-      throw new UnauthorizedError('CREDENCIALES_INVALIDAS', 'Email o contraseña incorrectos.');
-    }
-
-    const passwordValido = await bcrypt.compare(dto.password, usuario.password_hash);
-
-    if (!passwordValido) {
-      throw new UnauthorizedError('CREDENCIALES_INVALIDAS', 'Email o contraseña incorrectos.');
-    }
-
-    const userId = Number(usuario.usuario_id);
-    const suscripcion = Array.isArray(usuario.suscripciones)
-      ? usuario.suscripciones[0] ?? null
-      : usuario.suscripciones;
-
-    return {
-      usuario: this.mapUsuarioPublico(usuario),
-      suscripcion,
-      accessToken: generarAccessToken(userId, usuario.email),
-      refreshToken: generarRefreshToken(userId, usuario.email),
-    };
+    return data ? Number(data.usuario_id) : null;
   }
 
-  async refresh(dto: RefreshDTO) {
-    if (!dto.refreshToken) {
-      throw new BadRequestError('REFRESH_REQUERIDO', 'El refresh token es requerido.');
-    }
-
-    let payload;
-    try {
-      payload = verificarToken(dto.refreshToken);
-    } catch {
-      throw new UnauthorizedError('TOKEN_INVALIDO', 'Refresh token inválido o expirado.');
-    }
-
-    if (payload.type !== 'refresh') {
-      throw new UnauthorizedError('TOKEN_INVALIDO', 'El token recibido no es refresh token.');
-    }
-
-    const usuario = await this.getProfile(payload.sub);
-
+  async syncSupabaseUser(user: User, dto: SupabaseSessionDTO): Promise<AuthSessionResponse> {
+    const result = await this.syncSupabaseUserInternal(user, dto);
     return {
-      accessToken: generarAccessToken(payload.sub, usuario.email),
-      refreshToken: generarRefreshToken(payload.sub, usuario.email),
+      usuario: result.usuario,
+      isNewUser: result.isNewUser,
     };
-  }
-
-  async logout(_userId: number): Promise<void> {
-    // Flujo stateless por ahora. Si agregamos almacenamiento de refresh tokens,
-    // aquí se invalidan en DB.
-    return;
   }
 
   async getProfile(userId: number): Promise<UsuarioPublico> {
     const { data, error } = await supabase
       .from('usuarios')
-      .select('usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id')
+      .select(
+        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
+      )
       .eq('usuario_id', userId)
       .maybeSingle();
 
@@ -258,7 +102,9 @@ export class AuthService {
       .from('usuarios')
       .update(updateData)
       .eq('usuario_id', userId)
-      .select('usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id')
+      .select(
+        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
+      )
       .maybeSingle();
 
     if (error) {
@@ -270,62 +116,6 @@ export class AuthService {
     }
 
     return this.mapUsuarioPublico(data);
-  }
-
-  async changePassword(userId: number, dto: ChangePasswordDTO): Promise<void> {
-    if (!dto.currentPassword || !dto.newPassword) {
-      throw new BadRequestError(
-        'CAMPOS_REQUERIDOS',
-        'Los campos currentPassword y newPassword son obligatorios.',
-      );
-    }
-
-    if (dto.newPassword.length < 8) {
-      throw new BadRequestError('PASSWORD_DEBIL', 'La contraseña debe tener al menos 8 caracteres.');
-    }
-
-    const { data: usuario, error } = await supabase
-      .from('usuarios')
-      .select('usuario_id, password_hash')
-      .eq('usuario_id', userId)
-      .maybeSingle();
-
-    if (error) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo validar la contraseña actual.');
-    }
-
-    if (!usuario) {
-      throw new NotFoundError('USUARIO_NO_ENCONTRADO', 'El usuario no existe.');
-    }
-
-    const passwordValido = await bcrypt.compare(dto.currentPassword, usuario.password_hash);
-    if (!passwordValido) {
-      throw new UnauthorizedError('CREDENCIALES_INVALIDAS', 'La contraseña actual es incorrecta.');
-    }
-
-    const password_hash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
-    const { error: updateError } = await supabase
-      .from('usuarios')
-      .update({ password_hash })
-      .eq('usuario_id', userId);
-
-    if (updateError) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo actualizar la contraseña.');
-    }
-  }
-
-  private validarRegistro(dto: RegisterDTO): void {
-    if (!dto.nombre || !dto.email || !dto.password) {
-      throw new BadRequestError('CAMPOS_REQUERIDOS', 'Los campos nombre, email y password son obligatorios.');
-    }
-
-    if (dto.password.length < 8) {
-      throw new BadRequestError('PASSWORD_DEBIL', 'La contraseña debe tener al menos 8 caracteres.');
-    }
-
-    if (dto.moneda_base && !['DOP', 'USD'].includes(dto.moneda_base)) {
-      throw new BadRequestError('MONEDA_INVALIDA', 'La moneda base debe ser DOP o USD.');
-    }
   }
 
   async setDefaultBudget(userId: number, presupuestoId: number | null): Promise<void> {
@@ -357,7 +147,289 @@ export class AuthService {
       .update({ presupuesto_default_id: presupuestoId })
       .eq('usuario_id', userId);
 
-    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el presupuesto por defecto.');
+    if (error) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo actualizar el presupuesto por defecto.');
+    }
+  }
+
+  private async syncSupabaseUserInternal(user: User, dto: SupabaseSessionDTO): Promise<SyncResult> {
+    const emailNormalizado = user.email!.toLowerCase().trim();
+    const monedaBase = this.normalizarMonedaBase(dto.moneda_base);
+
+    const { data: existentePorAuth, error: errorPorAuth } = await supabase
+      .from('usuarios')
+      .select(
+        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
+      )
+      .eq('supabase_auth_user_id', user.id)
+      .maybeSingle();
+
+    if (errorPorAuth) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar la cuenta autenticada.');
+    }
+
+    if (existentePorAuth) {
+      return {
+        isNewUser: false,
+        userId: Number(existentePorAuth.usuario_id),
+        usuario: this.mapUsuarioPublico(existentePorAuth),
+      };
+    }
+
+    const { data: existentePorEmail, error: errorPorEmail } = await supabase
+      .from('usuarios')
+      .select(
+        'usuario_id, supabase_auth_user_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
+      )
+      .eq('email', emailNormalizado)
+      .maybeSingle();
+
+    if (errorPorEmail) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar el email de la cuenta autenticada.');
+    }
+
+    if (existentePorEmail) {
+      if (
+        existentePorEmail.supabase_auth_user_id &&
+        existentePorEmail.supabase_auth_user_id !== user.id
+      ) {
+        throw new ConflictError(
+          'EMAIL_EXISTENTE',
+          'Este email ya está vinculado a otra cuenta autenticada.',
+        );
+      }
+
+      const updateData: Record<string, unknown> = {
+        supabase_auth_user_id: user.id,
+      };
+
+      if (!existentePorEmail.nombre?.trim()) {
+        updateData.nombre = this.obtenerNombreUsuario(user);
+      }
+
+      const { data: linkedUser, error: errorLink } = await supabase
+        .from('usuarios')
+        .update(updateData)
+        .eq('usuario_id', existentePorEmail.usuario_id)
+        .select(
+          'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
+        )
+        .single();
+
+      if (errorLink || !linkedUser) {
+        throw new BadRequestError('DB_ERROR', 'No se pudo vincular la cuenta autenticada.');
+      }
+
+      await this.ensureInitialSubscription(Number(linkedUser.usuario_id));
+      await this.ensureDefaultBudget(Number(linkedUser.usuario_id));
+      await this.acceptPendingInvitations(Number(linkedUser.usuario_id), emailNormalizado);
+
+      return {
+        isNewUser: false,
+        userId: Number(linkedUser.usuario_id),
+        usuario: this.mapUsuarioPublico(linkedUser),
+      };
+    }
+
+    const { data: usuario, error: errorUsuario } = await supabase
+      .from('usuarios')
+      .insert({
+        nombre: this.obtenerNombreUsuario(user),
+        email: emailNormalizado,
+        moneda_base: monedaBase,
+        supabase_auth_user_id: user.id,
+      })
+      .select(
+        'usuario_id, nombre, email, moneda_base, meta_financiera, meta_monto, meta_fecha, creado_en, presupuesto_default_id',
+      )
+      .single();
+
+    if (errorUsuario || !usuario) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo crear el usuario autenticado.');
+    }
+
+    const userId = Number(usuario.usuario_id);
+    await this.ensureInitialSubscription(userId);
+    await this.ensureDefaultBudget(userId);
+    await this.acceptPendingInvitations(userId, emailNormalizado);
+
+    return {
+      isNewUser: true,
+      userId,
+      usuario: this.mapUsuarioPublico(usuario),
+    };
+  }
+
+  private normalizarMonedaBase(monedaBase?: string): 'DOP' | 'USD' {
+    if (!monedaBase) return 'DOP';
+    if (monedaBase === 'DOP' || monedaBase === 'USD') return monedaBase;
+    throw new BadRequestError('MONEDA_INVALIDA', 'La moneda base debe ser DOP o USD.');
+  }
+
+  private obtenerNombreUsuario(user: User): string {
+    const metadata = user.user_metadata ?? {};
+    const fullName = [
+      metadata.full_name,
+      metadata.given_name,
+      metadata.family_name,
+      metadata.name,
+    ]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .join(' ')
+      .trim();
+
+    if (fullName) {
+      return fullName;
+    }
+
+    const emailLocalPart = user.email?.split('@')[0]?.replace(/[._-]+/g, ' ')?.trim();
+    if (emailLocalPart) {
+      return emailLocalPart
+        .split(' ')
+        .filter(Boolean)
+        .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join(' ');
+    }
+
+    return 'Usuario';
+  }
+
+  private async ensureInitialSubscription(userId: number): Promise<void> {
+    const { data: suscripcionExistente, error: errorConsulta } = await supabase
+      .from('suscripciones')
+      .select('suscripcion_id')
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (errorConsulta) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar la suscripción del usuario.');
+    }
+
+    if (suscripcionExistente) return;
+
+    const { error: errorSuscripcion } = await supabase.from('suscripciones').insert({
+      usuario_id: userId,
+      estado: 'prueba',
+      plan: 'mensual',
+    });
+
+    if (errorSuscripcion) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo crear la suscripción inicial.');
+    }
+  }
+
+  private async ensureDefaultBudget(userId: number): Promise<void> {
+    const { data: presupuestoExistente, error: errorConsulta } = await supabase
+      .from('presupuestos')
+      .select('presupuesto_id')
+      .eq('usuario_id', userId)
+      .is('espacio_id', null)
+      .order('presupuesto_id', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (errorConsulta) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar el presupuesto predeterminado.');
+    }
+
+    let presupuestoId = presupuestoExistente ? Number(presupuestoExistente.presupuesto_id) : null;
+
+    if (!presupuestoId) {
+      const { data: nuevoPresupuesto, error: errorBudget } = await supabase
+        .from('presupuestos')
+        .insert({
+          usuario_id: userId,
+          nombre: 'Predeterminado',
+          periodo: 'mensual',
+          dia_inicio: 1,
+          ingresos: 0,
+          ahorro_objetivo: 0,
+          activo: true,
+          espacio_id: null,
+        })
+        .select('presupuesto_id')
+        .single();
+
+      if (errorBudget || !nuevoPresupuesto) {
+        throw new BadRequestError('DB_ERROR', 'No se pudo crear el presupuesto predeterminado.');
+      }
+
+      presupuestoId = Number(nuevoPresupuesto.presupuesto_id);
+    }
+
+    const { data: usuario, error: errorUsuario } = await supabase
+      .from('usuarios')
+      .select('presupuesto_default_id')
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (errorUsuario) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar el perfil del usuario.');
+    }
+
+    if (usuario?.presupuesto_default_id) return;
+
+    const { error: errorUpdate } = await supabase
+      .from('usuarios')
+      .update({ presupuesto_default_id: presupuestoId })
+      .eq('usuario_id', userId);
+
+    if (errorUpdate) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo asignar el presupuesto predeterminado.');
+    }
+  }
+
+  private async acceptPendingInvitations(userId: number, email: string): Promise<void> {
+    const now = new Date().toISOString();
+
+    const { data: invitations } = await supabase
+      .from('espacio_invitaciones')
+      .select('invitacion_id, espacio_id, espacios_compartidos(nombre)')
+      .eq('email_invitado', email)
+      .eq('estado', 'pendiente')
+      .gte('expira_en', now);
+
+    if (!invitations?.length) return;
+
+    for (const inv of invitations) {
+      const espacioNombre = Array.isArray(inv.espacios_compartidos)
+        ? inv.espacios_compartidos[0]?.nombre
+        : inv.espacios_compartidos?.nombre;
+
+      const { data: presupuesto } = await supabase
+        .from('presupuestos')
+        .select('presupuesto_id')
+        .eq('espacio_id', inv.espacio_id)
+        .maybeSingle();
+
+      await supabase.from('espacio_miembros').upsert(
+        {
+          espacio_id: inv.espacio_id,
+          usuario_id: userId,
+          rol: 'miembro',
+        },
+        { onConflict: 'espacio_id,usuario_id' },
+      );
+
+      await supabase
+        .from('espacio_invitaciones')
+        .update({ estado: 'aceptada' })
+        .eq('invitacion_id', inv.invitacion_id);
+
+      const { error: alertError } = await supabase.from('alertas').insert({
+        usuario_id: userId,
+        tipo: 'invitacion_aceptada',
+        titulo: 'Te uniste a un presupuesto compartido',
+        cuerpo: `Ahora eres miembro del presupuesto "${espacioNombre ?? 'compartido'}". Ya puedes ver y registrar transacciones.`,
+        datos_extra: {
+          espacio_id: inv.espacio_id,
+          presupuesto_id: presupuesto ? Number(presupuesto.presupuesto_id) : null,
+          budget_nombre: espacioNombre ?? null,
+        },
+        espacio_id: inv.espacio_id,
+      });
+      if (alertError) console.error('Error creando alerta de invitación aceptada:', alertError);
+    }
   }
 
   private mapUsuarioPublico(usuario: any): UsuarioPublico {
@@ -370,7 +442,9 @@ export class AuthService {
       meta_monto: usuario.meta_monto,
       meta_fecha: usuario.meta_fecha,
       creado_en: usuario.creado_en,
-      presupuesto_default_id: usuario.presupuesto_default_id ? Number(usuario.presupuesto_default_id) : null,
+      presupuesto_default_id: usuario.presupuesto_default_id
+        ? Number(usuario.presupuesto_default_id)
+        : null,
     };
   }
 }

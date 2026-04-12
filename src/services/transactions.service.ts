@@ -26,7 +26,7 @@ const createSchema = z.object({
   monto: z.number().positive(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']),
   budgetId: z.number().int().positive(),
-  catKey: z.string().min(1).max(80),
+  catKey: z.string().min(1).max(80).nullable().optional(),
   walletId: z.number().int().positive(),
   toWalletId: z.number().int().positive().optional(),
   nota: z.string().max(500).optional(),
@@ -39,7 +39,7 @@ const updateSchema = z.object({
   monto: z.number().positive().optional(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']).optional(),
   budgetId: z.number().int().positive().optional(),
-  catKey: z.string().min(1).max(80).optional(),
+  catKey: z.string().min(1).max(80).nullable().optional(),
   walletId: z.number().int().positive().optional(),
   toWalletId: z.number().int().positive().nullable().optional(),
   nota: z.string().max(500).nullable().optional(),
@@ -55,7 +55,7 @@ export class TransactionsService {
 
     let categoryId: number | null = null;
     if (filters.catKey) {
-      categoryId = await this.resolveCategoryId(userId, filters.catKey);
+      categoryId = (await this.resolveCategory(userId, filters.catKey))?.id ?? null;
       if (!categoryId) {
         return {
           data: [],
@@ -168,10 +168,12 @@ export class TransactionsService {
 
     if (payload.toWalletId) await this.validateWalletOwnership(userId, payload.toWalletId);
 
-    const categoriaId = await this.resolveCategoryId(userId, payload.catKey);
-    if (!categoriaId) {
-      throw new BadRequestError('CATEGORY_NOT_FOUND', 'La categoría indicada no existe.');
-    }
+    const category = await this.resolveCategory(userId, payload.catKey ?? null);
+    const categoriaId = this.resolveTransactionCategoryId(
+      payload.tipo,
+      payload.catKey ?? null,
+      category,
+    );
 
     const { data, error } = await supabase
       .from('transacciones')
@@ -258,13 +260,17 @@ export class TransactionsService {
       await this.validateWalletOwnership(userId, nextToWalletId);
     }
 
-    let categoriaId: number | undefined;
-    if (payload.catKey !== undefined) {
-      const resolved = await this.resolveCategoryId(userId, payload.catKey);
-      if (!resolved) {
-        throw new BadRequestError('CATEGORY_NOT_FOUND', 'La categoría indicada no existe.');
-      }
-      categoriaId = resolved;
+    let categoriaId: number | null | undefined;
+    const changingIntoTransfer = nextTipo === 'transferencia' && existing.tipo !== 'transferencia';
+    if (payload.catKey !== undefined || payload.tipo !== undefined) {
+      const effectiveCatKey =
+        payload.catKey !== undefined
+          ? payload.catKey
+          : changingIntoTransfer
+            ? null
+            : (existing.catKey ?? null);
+      const resolved = await this.resolveCategory(userId, effectiveCatKey);
+      categoriaId = this.resolveTransactionCategoryId(nextTipo, effectiveCatKey, resolved);
     }
 
     const updateData: Record<string, unknown> = {};
@@ -331,10 +337,15 @@ export class TransactionsService {
     await this.applyWalletAdjustments(ownerUserId, revertImpact);
   }
 
-  private async resolveCategoryId(userId: number, slug: string): Promise<number | null> {
+  private async resolveCategory(
+    userId: number,
+    slug: string | null | undefined,
+  ): Promise<{ id: number; tipo: string } | null> {
+    if (!slug) return null;
+
     const { data, error } = await supabase
       .from('categorias')
-      .select('categoria_id, usuario_id, es_sistema')
+      .select('categoria_id, usuario_id, es_sistema, tipo')
       .eq('slug', slug)
       .or(`es_sistema.eq.true,usuario_id.eq.${userId}`)
       .limit(1)
@@ -345,7 +356,44 @@ export class TransactionsService {
     }
 
     if (!data) return null;
-    return Number(data.categoria_id);
+    return { id: Number(data.categoria_id), tipo: String(data.tipo) };
+  }
+
+  private resolveTransactionCategoryId(
+    tipo: string,
+    catKey: string | null | undefined,
+    category: { id: number; tipo: string } | null,
+  ): number | null {
+    if (tipo === 'transferencia') {
+      if (catKey && !category) {
+        throw new BadRequestError('CATEGORY_NOT_FOUND', 'La categoría indicada no existe.');
+      }
+      if (category && category.tipo !== 'transferencia') {
+        throw new BadRequestError(
+          'CATEGORY_TYPE_MISMATCH',
+          'Las transferencias solo pueden usar categorías de transferencia.',
+        );
+      }
+      return category?.id ?? null;
+    }
+
+    if (!catKey) {
+      throw new BadRequestError(
+        'VALIDACION_ERROR',
+        'La categoría es obligatoria para ingresos y gastos.',
+      );
+    }
+    if (!category) {
+      throw new BadRequestError('CATEGORY_NOT_FOUND', 'La categoría indicada no existe.');
+    }
+    if (category.tipo !== tipo) {
+      throw new BadRequestError(
+        'CATEGORY_TYPE_MISMATCH',
+        `La categoría indicada es de tipo ${category.tipo} y no coincide con este movimiento.`,
+      );
+    }
+
+    return category.id;
   }
 
   private async validateWalletOwnership(userId: number, walletId: number): Promise<{ moneda: string }> {

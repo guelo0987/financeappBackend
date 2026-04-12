@@ -1,10 +1,12 @@
-import { JwtPayload } from './auth.types';
+import { User } from '@supabase/supabase-js';
 
 declare global {
   namespace Express {
     interface Request {
-      user?: JwtPayload;
+      supabaseUser?: User;
       userId?: number;
+      supabaseAuthUserId?: string;
+      userEmail?: string;
     }
   }
 }
