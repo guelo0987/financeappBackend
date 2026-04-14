@@ -3,7 +3,7 @@ export type TipoTransaccion = 'ingreso' | 'gasto' | 'transferencia';
 export type Moneda = 'DOP' | 'USD';
 
 export interface CreateRecurringDTO {
-  budgetId: number;
+  budgetId?: number | null;
   walletId?: number | null;
   catKey?: string | null;
   tipo: TipoTransaccion;
@@ -17,7 +17,7 @@ export interface CreateRecurringDTO {
 }
 
 export interface UpdateRecurringDTO {
-  budgetId?: number;
+  budgetId?: number | null;
   walletId?: number | null;
   catKey?: string | null;
   tipo?: TipoTransaccion;

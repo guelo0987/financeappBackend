@@ -25,7 +25,7 @@ const createSchema = z.object({
   descripcion: z.string().min(1).max(255),
   monto: z.number().positive(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']),
-  budgetId: z.number().int().positive(),
+  budgetId: z.number().int().positive().nullable().optional(),
   catKey: z.string().min(1).max(80).nullable().optional(),
   walletId: z.number().int().positive(),
   toWalletId: z.number().int().positive().optional(),
@@ -38,7 +38,7 @@ const updateSchema = z.object({
   descripcion: z.string().min(1).max(255).optional(),
   monto: z.number().positive().optional(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']).optional(),
-  budgetId: z.number().int().positive().optional(),
+  budgetId: z.number().int().positive().nullable().optional(),
   catKey: z.string().min(1).max(80).nullable().optional(),
   walletId: z.number().int().positive().optional(),
   toWalletId: z.number().int().positive().nullable().optional(),
@@ -75,14 +75,7 @@ export class TransactionsService {
       await this.getAccessibleBudget(userId, filters.budgetId);
       query = query.eq('presupuesto_id', filters.budgetId);
     } else {
-      const budgetIds = await this.getAccessibleBudgetIds(userId);
-      if (budgetIds.length === 0) {
-        return {
-          data: [],
-          meta: { page, limit, total: 0, totalPages: 0, hasMore: false },
-        };
-      }
-      query = query.in('presupuesto_id', budgetIds);
+      query = query.eq('usuario_id', userId);
     }
 
     if (filters.tipo) query = query.eq('tipo', filters.tipo);
@@ -154,7 +147,9 @@ export class TransactionsService {
       }
     }
 
-    const budget = await this.getAccessibleBudget(userId, payload.budgetId);
+    const budget = payload.budgetId
+      ? await this.getAccessibleBudget(userId, payload.budgetId)
+      : null;
     const wallet = await this.validateWalletOwnership(userId, payload.walletId);
 
     // Validate currency match between transaction and wallet
@@ -179,8 +174,8 @@ export class TransactionsService {
       .from('transacciones')
       .insert({
         usuario_id: userId,
-        presupuesto_id: payload.budgetId,
-        espacio_id: budget.espacio_id ? Number(budget.espacio_id) : null,
+        presupuesto_id: payload.budgetId ?? null,
+        espacio_id: budget?.espacio_id ? Number(budget.espacio_id) : null,
         activo_id: payload.walletId,
         activo_destino_id: payload.tipo === 'transferencia' ? payload.toWalletId : null,
         tipo: payload.tipo,
@@ -215,11 +210,12 @@ export class TransactionsService {
     const existing = await this.getById(userId, txnId);
     await this.assertTransactionWritable(userId, existing);
     const isOwner = Number(existing.userId) === userId;
-    const nextBudgetId = payload.budgetId ?? existing.budgetId;
-    if (!nextBudgetId) {
-      throw new BadRequestError('VALIDACION_ERROR', 'budgetId es requerido para la transacción.');
-    }
-    const budget = await this.getAccessibleBudget(userId, nextBudgetId);
+    const nextBudgetId = payload.budgetId !== undefined
+      ? payload.budgetId
+      : existing.budgetId;
+    const budget = nextBudgetId
+      ? await this.getAccessibleBudget(userId, nextBudgetId)
+      : null;
 
     const nextTipo = payload.tipo ?? existing.tipo;
     const nextWalletId = payload.walletId ?? existing.walletId;
@@ -282,7 +278,7 @@ export class TransactionsService {
     if (payload.walletId !== undefined) updateData.activo_id = payload.walletId;
     if (payload.toWalletId !== undefined) updateData.activo_destino_id = payload.toWalletId;
     if (payload.budgetId !== undefined) {
-      updateData.espacio_id = budget.espacio_id ? Number(budget.espacio_id) : null;
+      updateData.espacio_id = budget?.espacio_id ? Number(budget.espacio_id) : null;
     }
     if (payload.nota !== undefined) updateData.nota = payload.nota;
     if (payload.moneda !== undefined) updateData.moneda = payload.moneda;
@@ -493,34 +489,6 @@ export class TransactionsService {
     if (!isOwner && !isAdmin) {
       throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No puede modificar esta transacción.');
     }
-  }
-
-  private async getAccessibleBudgetIds(userId: number): Promise<number[]> {
-    // Run own budgets and space memberships in parallel
-    const [ownResult, memberResult] = await Promise.all([
-      supabase.from('presupuestos').select('presupuesto_id').eq('usuario_id', userId),
-      supabase.from('espacio_miembros').select('espacio_id').eq('usuario_id', userId),
-    ]);
-
-    if (ownResult.error) throw new BadRequestError('DB_ERROR', 'No se pudieron validar los presupuestos del usuario.');
-    if (memberResult.error) throw new BadRequestError('DB_ERROR', 'No se pudieron validar espacios compartidos.');
-
-    const spaceIds = (memberResult.data ?? []).map((row: any) => Number(row.espacio_id));
-    let sharedBudgets: any[] = [];
-    if (spaceIds.length > 0) {
-      const { data, error } = await supabase
-        .from('presupuestos')
-        .select('presupuesto_id')
-        .in('espacio_id', spaceIds);
-      if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron validar presupuestos compartidos.');
-      sharedBudgets = data ?? [];
-    }
-
-    const ids = new Set<number>();
-    for (const row of ownResult.data ?? []) ids.add(Number(row.presupuesto_id));
-    for (const row of sharedBudgets) ids.add(Number(row.presupuesto_id));
-
-    return Array.from(ids.values());
   }
 
   private async getAccessibleBudget(userId: number, budgetId: number): Promise<any> {

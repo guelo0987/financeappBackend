@@ -158,13 +158,12 @@ components:
           type: boolean
     TransactionRequest:
       type: object
-      required: [fecha, descripcion, monto, tipo, budgetId, catKey, walletId]
+      required: [fecha, descripcion, monto, tipo, walletId]
       example:
         fecha: "2026-03-09"
         descripcion: "Compra supermercado"
         monto: 4200
         tipo: gasto
-        budgetId: 1
         catKey: groceries
         walletId: 3
         moneda: DOP
@@ -181,12 +180,17 @@ components:
           enum: [ingreso, gasto, transferencia]
         budgetId:
           type: integer
+          nullable: true
+          description: Opcional. Si no se envía, la transacción queda fuera de cualquier presupuesto.
         catKey:
           type: string
+          nullable: true
+          description: Requerido para ingresos y gastos. Opcional en transferencias.
         walletId:
           type: integer
         toWalletId:
           type: integer
+          description: Requerido para transferencias.
         nota:
           type: string
         moneda:
@@ -208,8 +212,10 @@ components:
           enum: [ingreso, gasto, transferencia]
         budgetId:
           type: integer
+          nullable: true
         catKey:
           type: string
+          nullable: true
         walletId:
           type: integer
         toWalletId:
@@ -329,9 +335,8 @@ components:
                 type: number
     RecurringRequest:
       type: object
-      required: [budgetId, tipo, monto, frecuencia, diaEjecucion]
+      required: [tipo, monto, frecuencia, diaEjecucion]
       example:
-        budgetId: 1
         walletId: 10
         catKey: salario
         tipo: ingreso
@@ -344,6 +349,8 @@ components:
       properties:
         budgetId:
           type: integer
+          nullable: true
+          description: Opcional. Si no se envía, la automática queda fuera de cualquier presupuesto.
         walletId:
           type: integer
           nullable: true
@@ -379,6 +386,7 @@ components:
       properties:
         budgetId:
           type: integer
+          nullable: true
         walletId:
           type: integer
           nullable: true

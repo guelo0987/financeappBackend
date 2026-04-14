@@ -6,16 +6,13 @@ const supabase: any = getSupabaseClient();
 export class DashboardService {
   async getDashboard(userId: number) {
     const currentRange = this.currentMonthRange();
-
-    // Get active budget first — needed to scope shared-budget queries
     const activeBudget = await this.getActiveBudget(userId);
-    const activeBudgetId: number | null = activeBudget?.id ?? null;
 
     const [currentMonth, wallets, recentTransactions, topCategories] = await Promise.all([
-      this.getCurrentMonthSummary(userId, currentRange, activeBudgetId),
+      this.getCurrentMonthSummary(userId, currentRange),
       this.getWalletTotals(userId),
-      this.getRecentTransactions(userId, activeBudgetId),
-      this.getTopCategories(userId, currentRange, activeBudgetId),
+      this.getRecentTransactions(userId),
+      this.getTopCategories(userId, currentRange),
     ]);
 
     return {
@@ -104,22 +101,13 @@ export class DashboardService {
   private async getCurrentMonthSummary(
     userId: number,
     range: { desde: string; hasta: string },
-    activeBudgetId: number | null,
   ) {
-    // If there's an active budget, filter by presupuesto_id to include all members' transactions
-    let query = supabase
+    const { data, error } = await supabase
       .from('transacciones')
       .select('tipo, monto')
+      .eq('usuario_id', userId)
       .gte('fecha', range.desde)
       .lte('fecha', range.hasta);
-
-    if (activeBudgetId) {
-      query = query.eq('presupuesto_id', activeBudgetId);
-    } else {
-      query = query.eq('usuario_id', userId);
-    }
-
-    const { data, error } = await query;
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo calcular el resumen mensual.');
 
     let totalIngresos = 0;
@@ -162,24 +150,16 @@ export class DashboardService {
     };
   }
 
-  private async getRecentTransactions(userId: number, activeBudgetId: number | null) {
-    let query = supabase
+  private async getRecentTransactions(userId: number) {
+    const { data, error } = await supabase
       .from('transacciones')
       .select(
         'transaccion_id, tipo, monto, moneda, descripcion, fecha, categoria_id, usuario_id, categorias(slug, nombre, icono), usuarios(nombre)',
       )
+      .eq('usuario_id', userId)
       .order('fecha', { ascending: false })
       .order('transaccion_id', { ascending: false })
       .limit(5);
-
-    // Include all members' transactions if on an active shared budget
-    if (activeBudgetId) {
-      query = query.eq('presupuesto_id', activeBudgetId);
-    } else {
-      query = query.eq('usuario_id', userId);
-    }
-
-    const { data, error } = await query;
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron cargar las transacciones recientes.');
 
     return (data ?? []).map((row: any) => {
@@ -203,22 +183,14 @@ export class DashboardService {
   private async getTopCategories(
     userId: number,
     range: { desde: string; hasta: string },
-    activeBudgetId: number | null,
   ) {
-    let query = supabase
+    const { data, error } = await supabase
       .from('transacciones')
       .select('monto, categoria_id, categorias(slug, nombre, icono)')
+      .eq('usuario_id', userId)
       .eq('tipo', 'gasto')
       .gte('fecha', range.desde)
       .lte('fecha', range.hasta);
-
-    if (activeBudgetId) {
-      query = query.eq('presupuesto_id', activeBudgetId);
-    } else {
-      query = query.eq('usuario_id', userId);
-    }
-
-    const { data, error } = await query;
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudieron calcular las top categorías.');
 
     const totals = new Map<number, { monto: number; meta: any }>();

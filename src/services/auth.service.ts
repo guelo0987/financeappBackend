@@ -221,7 +221,6 @@ export class AuthService {
       }
 
       await this.ensureInitialSubscription(Number(linkedUser.usuario_id));
-      await this.ensureDefaultBudget(Number(linkedUser.usuario_id));
       await this.acceptPendingInvitations(Number(linkedUser.usuario_id), emailNormalizado);
 
       return {
@@ -250,7 +249,6 @@ export class AuthService {
 
     const userId = Number(usuario.usuario_id);
     await this.ensureInitialSubscription(userId);
-    await this.ensureDefaultBudget(userId);
     await this.acceptPendingInvitations(userId, emailNormalizado);
 
     return {
@@ -315,67 +313,6 @@ export class AuthService {
 
     if (errorSuscripcion) {
       throw new BadRequestError('DB_ERROR', 'No se pudo crear la suscripción inicial.');
-    }
-  }
-
-  private async ensureDefaultBudget(userId: number): Promise<void> {
-    const { data: presupuestoExistente, error: errorConsulta } = await supabase
-      .from('presupuestos')
-      .select('presupuesto_id')
-      .eq('usuario_id', userId)
-      .is('espacio_id', null)
-      .order('presupuesto_id', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (errorConsulta) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo validar el presupuesto predeterminado.');
-    }
-
-    let presupuestoId = presupuestoExistente ? Number(presupuestoExistente.presupuesto_id) : null;
-
-    if (!presupuestoId) {
-      const { data: nuevoPresupuesto, error: errorBudget } = await supabase
-        .from('presupuestos')
-        .insert({
-          usuario_id: userId,
-          nombre: 'Predeterminado',
-          periodo: 'mensual',
-          dia_inicio: 1,
-          ingresos: 0,
-          ahorro_objetivo: 0,
-          activo: true,
-          espacio_id: null,
-        })
-        .select('presupuesto_id')
-        .single();
-
-      if (errorBudget || !nuevoPresupuesto) {
-        throw new BadRequestError('DB_ERROR', 'No se pudo crear el presupuesto predeterminado.');
-      }
-
-      presupuestoId = Number(nuevoPresupuesto.presupuesto_id);
-    }
-
-    const { data: usuario, error: errorUsuario } = await supabase
-      .from('usuarios')
-      .select('presupuesto_default_id')
-      .eq('usuario_id', userId)
-      .maybeSingle();
-
-    if (errorUsuario) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo validar el perfil del usuario.');
-    }
-
-    if (usuario?.presupuesto_default_id) return;
-
-    const { error: errorUpdate } = await supabase
-      .from('usuarios')
-      .update({ presupuesto_default_id: presupuestoId })
-      .eq('usuario_id', userId);
-
-    if (errorUpdate) {
-      throw new BadRequestError('DB_ERROR', 'No se pudo asignar el presupuesto predeterminado.');
     }
   }
 

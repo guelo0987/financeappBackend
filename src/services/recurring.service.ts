@@ -6,7 +6,7 @@ import { CreateRecurringDTO, UpdateRecurringDTO } from '../types/recurring.types
 const supabase: any = getSupabaseClient();
 
 const createSchema = z.object({
-  budgetId: z.number().int().positive(),
+  budgetId: z.number().int().positive().nullable().optional(),
   walletId: z.number().int().positive().nullable().optional(),
   catKey: z.string().min(1).max(80).nullable().optional(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']),
@@ -20,7 +20,7 @@ const createSchema = z.object({
 });
 
 const updateSchema = z.object({
-  budgetId: z.number().int().positive().optional(),
+  budgetId: z.number().int().positive().nullable().optional(),
   walletId: z.number().int().positive().nullable().optional(),
   catKey: z.string().min(1).max(80).nullable().optional(),
   tipo: z.enum(['ingreso', 'gasto', 'transferencia']).optional(),
@@ -66,7 +66,9 @@ export class RecurringService {
     if (!parsed.success) throw new BadRequestError('VALIDACION_ERROR', parsed.error.message);
     const payload = parsed.data;
 
-    await this.getAccessibleBudget(userId, payload.budgetId);
+    if (payload.budgetId) {
+      await this.getAccessibleBudget(userId, payload.budgetId);
+    }
     if (payload.walletId) await this.validateWalletOwnership(userId, payload.walletId);
     const categoriaId = await this.resolveCategoryId(userId, payload.catKey ?? null);
 
@@ -74,7 +76,7 @@ export class RecurringService {
       .from('transacciones_recurrentes')
       .insert({
         usuario_id: userId,
-        presupuesto_id: payload.budgetId,
+        presupuesto_id: payload.budgetId ?? null,
         activo_id: payload.walletId ?? null,
         categoria_id: categoriaId,
         tipo: payload.tipo,
@@ -101,8 +103,12 @@ export class RecurringService {
     if (!parsed.success) throw new BadRequestError('VALIDACION_ERROR', parsed.error.message);
     const payload = parsed.data;
     const existing = await this.getOwnedRecurring(userId, id);
-    const nextBudgetId = payload.budgetId ?? Number(existing.presupuesto_id);
-    await this.getAccessibleBudget(userId, nextBudgetId);
+    const nextBudgetId = payload.budgetId !== undefined
+      ? payload.budgetId
+      : (existing.presupuesto_id ? Number(existing.presupuesto_id) : null);
+    if (nextBudgetId) {
+      await this.getAccessibleBudget(userId, nextBudgetId);
+    }
 
     const nextWalletId = payload.walletId !== undefined ? payload.walletId : existing.activo_id;
     if (nextWalletId) await this.validateWalletOwnership(userId, Number(nextWalletId));
@@ -205,7 +211,9 @@ export class RecurringService {
           continue;
         }
 
-        const budget = await this.getAccessibleBudget(Number(rec.usuario_id), Number(rec.presupuesto_id));
+        const budget = rec.presupuesto_id
+          ? await this.getAccessibleBudget(Number(rec.usuario_id), Number(rec.presupuesto_id))
+          : null;
 
         // Idempotency guard: advance proxima_ejecucion FIRST to prevent duplicate execution
         // on concurrent/retry runs. If transaction insert later fails, the recurring is
@@ -226,7 +234,7 @@ export class RecurringService {
         const { error: insertError } = await supabase.from('transacciones').insert({
           usuario_id: rec.usuario_id,
           presupuesto_id: rec.presupuesto_id,
-          espacio_id: budget.espacio_id ? Number(budget.espacio_id) : null,
+          espacio_id: budget?.espacio_id ? Number(budget.espacio_id) : null,
           activo_id: rec.activo_id ?? null,
           activo_destino_id: null,
           tipo: rec.tipo,
