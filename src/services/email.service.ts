@@ -7,7 +7,7 @@ export class EmailService {
   async sendBudgetInvitation(toEmail: string, inviterName: string, budgetName: string, token: string) {
     const baseUrl = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
-      : 'http://localhost:3000';
+      : 'https://financeapp-backend-eight.vercel.app';
     const inviteLink = `${baseUrl}/invitations/${token}/accept`;
 
     const { data, error } = await resend.emails.send({
