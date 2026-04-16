@@ -7,7 +7,7 @@ type ParseError = Error & {
   type?: string;
 };
 
-export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
+export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction): void {
   const parseError = err as ParseError;
 
   if (parseError.type === 'entity.parse.failed' || (err instanceof SyntaxError && parseError.status === 400)) {
@@ -21,6 +21,17 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
   }
 
   if (err instanceof AppError) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: '[app-error]',
+        method: req.method,
+        path: req.originalUrl,
+        statusCode: err.statusCode,
+        codigo: err.codigo,
+        mensaje: err.mensaje,
+      }),
+    );
     res.status(err.statusCode).json({
       error: {
         codigo: err.codigo,

@@ -36,6 +36,15 @@ export class EmailService {
       throw new Error('No se pudo enviar el correo de invitación.');
     }
 
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        msg: '[email] invitation queued',
+        toEmail,
+        emailId: data?.id ?? null,
+      }),
+    );
+
     return data;
   }
 }

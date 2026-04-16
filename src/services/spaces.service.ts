@@ -151,7 +151,7 @@ export class SpacesService {
 
     const { data: existingPending, error: pendingError } = await supabase
       .from('espacio_invitaciones')
-      .select('invitacion_id')
+      .select('invitacion_id, espacio_id, email_invitado, token, estado, expira_en, creado_en')
       .eq('espacio_id', spaceId)
       .eq('email_invitado', normalizedEmail)
       .eq('estado', 'pendiente')
@@ -161,7 +161,35 @@ export class SpacesService {
 
     if (pendingError) throw new BadRequestError('DB_ERROR', 'No se pudo validar invitación existente.');
     if (existingPending) {
-      throw new BadRequestError('SPACE_INVITE_PENDING', 'Ya existe una invitación pendiente para ese email.');
+      const [{ data: user }, { data: space }] = await Promise.all([
+        supabase.from('usuarios').select('nombre').eq('usuario_id', userId).single(),
+        supabase.from('espacios_compartidos').select('nombre').eq('espacio_id', spaceId).single(),
+      ]);
+
+      const renewedExpiration = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+      const { error: renewError } = await supabase
+        .from('espacio_invitaciones')
+        .update({ expira_en: renewedExpiration })
+        .eq('invitacion_id', Number(existingPending.invitacion_id));
+
+      if (renewError) throw new BadRequestError('DB_ERROR', 'No se pudo renovar la invitación pendiente.');
+
+      try {
+        await emailService.sendBudgetInvitation(
+          normalizedEmail,
+          user?.nombre || 'Alguien',
+          space?.nombre || 'un espacio',
+          existingPending.token,
+        );
+      } catch (emailError) {
+        console.error(`Email fallido para ${normalizedEmail}:`, emailError);
+        throw new BadRequestError('EMAIL_ERROR', 'No se pudo reenviar el correo de invitación.');
+      }
+
+      return {
+        ...existingPending,
+        expira_en: renewedExpiration,
+      };
     }
 
     const { data, error } = await supabase

@@ -323,14 +323,38 @@ export class BudgetsService {
 
     const { data: existingInvite } = await supabase
       .from('espacio_invitaciones')
-      .select('invitacion_id')
+      .select('invitacion_id, token')
       .eq('espacio_id', espacioId)
       .eq('email_invitado', normalizedEmail)
       .eq('estado', 'pendiente')
       .gte('expira_en', new Date().toISOString())
       .maybeSingle();
 
-    if (existingInvite) throw new ConflictError('INVITE_PENDING', `Ya existe una invitación pendiente para ${normalizedEmail}.`);
+    if (existingInvite) {
+      const renewedExpiration = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+      const { error: renewError } = await supabase
+        .from('espacio_invitaciones')
+        .update({ expira_en: renewedExpiration })
+        .eq('invitacion_id', Number(existingInvite.invitacion_id));
+
+      if (renewError) {
+        throw new BadRequestError('DB_ERROR', `No se pudo renovar la invitación para ${normalizedEmail}.`);
+      }
+
+      try {
+        await emailService.sendBudgetInvitation(
+          normalizedEmail,
+          inviterName,
+          budgetNombre,
+          existingInvite.token,
+        );
+      } catch (emailError) {
+        console.error(`Email fallido para ${normalizedEmail}:`, emailError);
+        throw new BadRequestError('EMAIL_ERROR', `No se pudo reenviar el correo de invitación a ${normalizedEmail}.`);
+      }
+
+      return;
+    }
 
     const { data: invite, error: inviteError } = await supabase
       .from('espacio_invitaciones')
