@@ -8,7 +8,7 @@ export class EmailService {
     const baseUrl = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000';
-    const inviteLink = `${baseUrl}/invitations/${token}/accept?email=${encodeURIComponent(toEmail)}`;
+    const inviteLink = `${baseUrl}/invitations/${token}/accept`;
 
     const { data, error } = await resend.emails.send({
       from: env.EMAIL_FROM,
@@ -26,7 +26,7 @@ export class EmailService {
           </div>
           <p>Si no esperabas esta invitación, puedes ignorar este correo.</p>
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-          <p style="color: #666; font-size: 12px;">WealthOS - Tu gestión financiera inteligente</p>
+          <p style="color: #666; font-size: 12px;">Menudo - Tu gestión financiera inteligente</p>
         </div>
       `,
     });

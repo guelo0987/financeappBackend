@@ -47,6 +47,7 @@ app.use('/webhooks', express.raw({ type: 'application/json', limit: '100kb' }));
 app.use('/webhooks', webhooksRoutes);
 
 app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: false }));
 app.use(globalLimiter);
 
 app.get('/health', async (_req, res) => {

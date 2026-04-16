@@ -266,18 +266,28 @@ export class AuthService {
 
   private obtenerNombreUsuario(user: User): string {
     const metadata = user.user_metadata ?? {};
-    const fullName = [
-      metadata.full_name,
-      metadata.given_name,
-      metadata.family_name,
-      metadata.name,
-    ]
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    const normalize = (value: unknown): string => {
+      return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+    };
+
+    const fullName = normalize(metadata.full_name);
+    if (fullName) {
+      return fullName;
+    }
+
+    const composedName = [normalize(metadata.given_name), normalize(metadata.family_name)]
+      .filter(Boolean)
       .join(' ')
       .trim();
 
-    if (fullName) {
-      return fullName;
+    if (composedName) {
+      return composedName;
+    }
+
+    const fallbackName = normalize(metadata.name);
+
+    if (fallbackName) {
+      return fallbackName;
     }
 
     const emailLocalPart = user.email?.split('@')[0]?.replace(/[._-]+/g, ' ')?.trim();

@@ -19,6 +19,26 @@ function planFromProductId(productId: string): string {
   return PLAN_MAP[productId] ?? 'mensual';
 }
 
+function parseNumericUserId(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const parsed = parseInt(String(value), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function uniqueStringValues(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const normalized = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result;
+}
+
 // ─── Subscription states ────────────────────────────────────────────────
 //
 //   prueba     → trial activo (usuario pasó por paywall, tiene info de pago)
@@ -32,13 +52,52 @@ function planFromProductId(productId: string): string {
 // ─────────────────────────────────────────────────────────────────────────
 
 export class SubscriptionsService {
+  private webhookUserCandidates(event: any): string[] {
+    const aliases = Array.isArray(event.aliases) ? event.aliases : [];
+    return uniqueStringValues([
+      event.app_user_id,
+      event.original_app_user_id,
+      ...aliases,
+    ]);
+  }
+
+  private async resolveWebhookUserId(event: any): Promise<number | null> {
+    const candidates = this.webhookUserCandidates(event);
+
+    for (const candidate of candidates) {
+      const numericId = parseNumericUserId(candidate);
+      if (numericId != null) return numericId;
+    }
+
+    if (!candidates.length) return null;
+
+    const { data, error } = await supabase
+      .from('suscripciones')
+      .select('usuario_id')
+      .in('revenuecat_id', candidates)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[webhook] Error resolviendo usuario por revenuecat_id:', error);
+      return null;
+    }
+
+    return data?.usuario_id ? Number(data.usuario_id) : null;
+  }
+
+  private primaryRevenueCatId(event: any, userId: number): string {
+    return this.webhookUserCandidates(event)[0] ?? String(userId);
+  }
+
   async handleWebhookEvent(event: any): Promise<void> {
     const type: string = event.type;
-    const appUserId: string = event.app_user_id ?? event.original_app_user_id;
-    const userId = parseInt(appUserId, 10);
+    const userId = await this.resolveWebhookUserId(event);
 
-    if (!userId || isNaN(userId)) {
-      console.warn('[webhook] app_user_id no es un entero válido:', appUserId);
+    if (!userId) {
+      console.warn('[webhook] No se pudo resolver usuario para evento:', {
+        type,
+        candidates: this.webhookUserCandidates(event),
+      });
       return;
     }
 
@@ -79,7 +138,7 @@ export class SubscriptionsService {
   private async handleInitialPurchase(userId: number, event: any): Promise<void> {
     const plan = planFromProductId(event.product_id ?? '');
     const periodType = (event.period_type ?? '').toUpperCase();
-    const rcId = event.original_app_user_id ?? String(userId);
+    const rcId = this.primaryRevenueCatId(event, userId);
 
     // Detect trial: RC may send period_type='TRIAL', OR if the user is
     // currently in 'prueba' (just registered), this is their trial start.
@@ -99,6 +158,7 @@ export class SubscriptionsService {
         .from('suscripciones')
         .update({
           plan,
+          precio_usd: PRICE_MAP[plan] ?? null,
           revenuecat_id: rcId,
           trial_fin: event.expiration_at_ms
             ? new Date(event.expiration_at_ms).toISOString()
@@ -140,7 +200,7 @@ export class SubscriptionsService {
         estado: 'activa',
         plan: 'lifetime',
         precio_usd: PRICE_MAP['lifetime'],
-        revenuecat_id: event.original_app_user_id ?? String(userId),
+        revenuecat_id: this.primaryRevenueCatId(event, userId),
         periodo_inicio: new Date(event.purchased_at_ms ?? Date.now()).toISOString(),
         periodo_fin: null, // lifetime = sin expiración
         cancelado_en: null,
@@ -161,6 +221,7 @@ export class SubscriptionsService {
         estado: 'activa',
         plan,
         precio_usd: PRICE_MAP[plan] ?? null,
+        revenuecat_id: this.primaryRevenueCatId(event, userId),
         periodo_inicio: new Date().toISOString(),
         periodo_fin: event.expiration_at_ms
           ? new Date(event.expiration_at_ms).toISOString()
@@ -260,6 +321,7 @@ export class SubscriptionsService {
       .update({
         plan,
         precio_usd: PRICE_MAP[plan] ?? null,
+        revenuecat_id: this.primaryRevenueCatId(event, userId),
         actualizado_en: new Date().toISOString(),
       })
       .eq('usuario_id', userId);

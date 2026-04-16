@@ -6,6 +6,35 @@ const supabase: any = getSupabaseClient();
 const emailService = new EmailService();
 
 export class SpacesService {
+  async getInvitationPreview(token: string) {
+    const normalizedToken = token?.trim();
+    if (!normalizedToken) return null;
+
+    const { data, error } = await supabase
+      .from('espacio_invitaciones')
+      .select(
+        'invitacion_id, espacio_id, email_invitado, estado, expira_en, espacios_compartidos(nombre)',
+      )
+      .eq('token', normalizedToken)
+      .maybeSingle();
+
+    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo cargar la invitación.');
+    if (!data) return null;
+
+    const espacio = Array.isArray(data.espacios_compartidos)
+      ? data.espacios_compartidos[0]
+      : data.espacios_compartidos;
+
+    return {
+      invitacion_id: Number(data.invitacion_id),
+      espacio_id: Number(data.espacio_id),
+      email_invitado: String(data.email_invitado),
+      estado: String(data.estado),
+      expira_en: data.expira_en,
+      espacio_nombre: espacio?.nombre ?? null,
+    };
+  }
+
   async listSpaces(userId: number) {
     const { data, error } = await supabase
       .from('espacio_miembros')
@@ -273,10 +302,7 @@ export class SpacesService {
     if (error) throw new BadRequestError('DB_ERROR', 'No se pudo cancelar invitación.');
   }
 
-  async acceptInvitation(token: string, email: string) {
-    const normalizedEmail = email?.toLowerCase().trim();
-    if (!normalizedEmail) throw new BadRequestError('VALIDACION_ERROR', 'El email es requerido.');
-
+  async acceptInvitation(token: string) {
     const { data: invitation, error } = await supabase
       .from('espacio_invitaciones')
       .select('invitacion_id, espacio_id, email_invitado, estado, expira_en')
@@ -295,9 +321,8 @@ export class SpacesService {
         .eq('invitacion_id', invitation.invitacion_id);
       throw new BadRequestError('VALIDACION_ERROR', 'La invitación ha expirado.');
     }
-    if (String(invitation.email_invitado).toLowerCase() !== normalizedEmail) {
-      throw new UnauthorizedError('FORBIDDEN', 'Este email no corresponde a la invitación.');
-    }
+
+    const normalizedEmail = String(invitation.email_invitado).toLowerCase().trim();
 
     const { data: user, error: userError } = await supabase
       .from('usuarios')
@@ -336,6 +361,7 @@ export class SpacesService {
       invitacion_id: Number(invitation.invitacion_id),
       espacio_id: Number(invitation.espacio_id),
       usuario_id: Number(user.usuario_id),
+      email_invitado: normalizedEmail,
       estado: 'aceptada',
     };
   }
@@ -374,4 +400,3 @@ export class SpacesService {
     return count ?? 0;
   }
 }
-

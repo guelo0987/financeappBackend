@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: WealthOS Backend API
+  title: Menudo Backend API
   version: 2.0.0
-  description: Swagger documentation for the WealthOS backend.
+  description: Swagger documentation for the Menudo backend.
 servers:
   - url: http://localhost:3000
 tags:

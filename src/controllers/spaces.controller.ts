@@ -112,78 +112,221 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export async function acceptInvitationPage(req: Request, res: Response): Promise<void> {
-  const token = escapeHtml(String(req.params.token ?? ''));
-  const email = escapeHtml(String(req.query.email ?? ''));
-  res.send(`<!DOCTYPE html>
+function renderInvitationDocument(options: {
+  title: string;
+  description: string;
+  email?: string | null;
+  detail?: string | null;
+  actionHtml?: string;
+  tone?: 'default' | 'success' | 'error';
+}): string {
+  const title = escapeHtml(options.title);
+  const description = escapeHtml(options.description);
+  const email = options.email ? escapeHtml(options.email) : '';
+  const detail = options.detail ? escapeHtml(options.detail) : '';
+  const toneClass = options.tone === 'success' ? 'success' : options.tone === 'error' ? 'error' : 'default';
+
+  return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Aceptar Invitación — WealthOS</title>
+  <title>${title} — Menudo</title>
   <style>
-    body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
-    .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; }
-    h2 { margin-top: 0; color: #1a1a1a; }
-    p { color: #555; }
-    button { background: #4F46E5; color: white; border: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 16px; }
-    button:hover { background: #4338CA; }
-    .msg { margin-top: 16px; font-weight: bold; }
-    .success { color: #16a34a; }
-    .error { color: #dc2626; }
+    :root {
+      color-scheme: light;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --primary: #4F46E5;
+      --primary-dark: #4338CA;
+      --success: #15803d;
+      --error: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at top, rgba(79,70,229,0.08), transparent 30%),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+    }
+    .card {
+      width: min(100%, 440px);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .stack {
+      display: grid;
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .email {
+      padding: 12px 16px;
+      border-radius: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 700;
+      word-break: break-word;
+    }
+    .detail {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .detail.default { color: var(--muted); }
+    .detail.success { color: var(--success); }
+    .detail.error { color: var(--error); }
+    form { margin: 0; }
+    button, .link-button {
+      width: 100%;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 48px;
+      padding: 14px 18px;
+      border: 0;
+      border-radius: 14px;
+      background: var(--primary);
+      color: white;
+      font-size: 15px;
+      font-weight: 800;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button:hover, .link-button:hover {
+      background: var(--primary-dark);
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Invitación a WealthOS</h2>
-    <p>Haz clic para unirte al presupuesto compartido.</p>
-    <p><strong>${email}</strong></p>
-    <button onclick="accept()">Aceptar Invitación</button>
-    <div id="msg" class="msg"></div>
+    <h1>${title}</h1>
+    <div class="stack">
+      <p>${description}</p>
+      ${email ? `<div class="email">${email}</div>` : ''}
+      ${detail ? `<div class="detail ${toneClass}">${detail}</div>` : ''}
+      ${options.actionHtml ?? ''}
+    </div>
   </div>
-  <script>
-    async function accept() {
-      const btn = document.querySelector('button');
-      btn.disabled = true;
-      btn.textContent = 'Procesando...';
-      try {
-        const res = await fetch('/invitations/${token}/accept', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: '${email}' })
-        });
-        const json = await res.json();
-        const msg = document.getElementById('msg');
-        if (res.ok) {
-          msg.className = 'msg success';
-          msg.textContent = '¡Invitación aceptada! Ya puedes abrir la app.';
-          btn.style.display = 'none';
-        } else {
-          msg.className = 'msg error';
-          msg.textContent = json.message || 'Error al aceptar la invitación.';
-          btn.disabled = false;
-          btn.textContent = 'Aceptar Invitación';
-        }
-      } catch {
-        document.getElementById('msg').className = 'msg error';
-        document.getElementById('msg').textContent = 'Error de conexión.';
-        btn.disabled = false;
-        btn.textContent = 'Aceptar Invitación';
-      }
-    }
-  </script>
 </body>
-</html>`);
+</html>`;
+}
+
+export async function acceptInvitationPage(req: Request, res: Response): Promise<void> {
+  const token = String(req.params.token ?? '');
+  const invitation = await spacesService.getInvitationPreview(token);
+
+  if (!invitation) {
+    res.status(404).send(
+      renderInvitationDocument({
+        title: 'Invitación no encontrada',
+        description: 'Este enlace ya no existe o fue invalidado.',
+        tone: 'error',
+      }),
+    );
+    return;
+  }
+
+  const expired = new Date(invitation.expira_en).getTime() < Date.now();
+  const status = invitation.estado;
+  const detail = invitation.espacio_nombre
+    ? `Presupuesto: ${invitation.espacio_nombre}`
+    : null;
+
+  if (status !== 'pendiente' || expired) {
+    const title = expired || status === 'expirada'
+      ? 'Invitación expirada'
+      : status === 'aceptada'
+      ? 'Invitación ya aceptada'
+      : 'Invitación no disponible';
+
+    const description = expired || status === 'expirada'
+      ? 'La invitación ya venció. Pide que te envíen una nueva.'
+      : status === 'aceptada'
+      ? 'Este acceso ya fue aceptado con la cuenta invitada.'
+      : 'La invitación ya no está disponible.';
+
+    res.status(status === 'aceptada' ? 200 : 410).send(
+      renderInvitationDocument({
+        title,
+        description,
+        email: invitation.email_invitado,
+        detail,
+        tone: status === 'aceptada' ? 'success' : 'error',
+      }),
+    );
+    return;
+  }
+
+  res.send(
+    renderInvitationDocument({
+      title: 'Invitación a Menudo',
+      description: 'Acepta esta invitación para unirte al presupuesto compartido con el correo que fue invitado.',
+      email: invitation.email_invitado,
+      detail,
+      actionHtml: `<form method="POST" action="/invitations/${escapeHtml(token)}/accept"><button type="submit">Aceptar invitación</button></form>`,
+    }),
+  );
 }
 
 export async function acceptInvitation(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const token = String(req.params.token ?? '');
-    const email = String(req.body.email ?? '');
-    const data = await spacesService.acceptInvitation(token, email);
+    const data = await spacesService.acceptInvitation(token);
+    const wantsHtml = !req.is('application/json') && req.accepts('html');
+
+    if (wantsHtml) {
+      res.send(
+        renderInvitationDocument({
+          title: 'Invitación aceptada',
+          description: 'Ya puedes abrir Menudo con la cuenta invitada para ver el presupuesto compartido.',
+          email: data.email_invitado,
+          detail: 'El acceso se agregó correctamente.',
+          tone: 'success',
+        }),
+      );
+      return;
+    }
+
     res.json({ data });
   } catch (error) {
+    const wantsHtml = !req.is('application/json') && req.accepts('html');
+    if (wantsHtml) {
+      const message = error instanceof Error ? error.message : 'No pudimos aceptar la invitación.';
+      res.status(400).send(
+        renderInvitationDocument({
+          title: 'No pudimos aceptar la invitación',
+          description: message,
+          tone: 'error',
+        }),
+      );
+      return;
+    }
+
     next(error);
   }
 }
-
