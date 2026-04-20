@@ -188,7 +188,33 @@ function renderAuthBridgePage({
       const hintEl = document.getElementById('hint');
 
       const hasError = hashParams.has('error_code') || hashParams.has('error_description');
-      const destination = nextUrl ? nextUrl + hash : null;
+      const destination = (() => {
+        if (!nextUrl) return null;
+        if (!hash) return nextUrl;
+
+        try {
+          const parsedNextUrl = new URL(nextUrl);
+          if (parsedNextUrl.protocol === 'menudo:') {
+            const mergedParams = new URLSearchParams(parsedNextUrl.search);
+            hashParams.forEach((value, key) => {
+              if (!mergedParams.has(key)) {
+                mergedParams.set(key, value);
+              }
+            });
+            const query = mergedParams.toString();
+            return parsedNextUrl.protocol +
+              '//' +
+              parsedNextUrl.host +
+              parsedNextUrl.pathname +
+              (query ? '?' + query : '') +
+              hash;
+          }
+        } catch (_) {
+          return nextUrl + hash;
+        }
+
+        return nextUrl + hash;
+      })();
 
       if (hasError) {
         titleEl.textContent = ${JSON.stringify(errorTitle)};

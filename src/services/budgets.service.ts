@@ -175,7 +175,7 @@ export class BudgetsService {
     const payload = parsed.data;
 
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetEditAccess(userId, budget);
 
     if (payload.categorias?.length) {
       await Promise.all(payload.categorias.map((item) => this.ensureCategoryVisible(userId, item.categoriaId)));
@@ -221,7 +221,7 @@ export class BudgetsService {
 
   async delete(userId: number, budgetId: number): Promise<void> {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetAdminAccess(userId, budget);
     const { error } = await supabase
       .from('presupuestos')
       .delete()
@@ -232,7 +232,7 @@ export class BudgetsService {
 
   async setActive(userId: number, budgetId: number): Promise<void> {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetAdminAccess(userId, budget);
     await this.deactivateAll(userId);
 
     const { error } = await supabase
@@ -255,7 +255,7 @@ export class BudgetsService {
 
   async addCategoryLimit(userId: number, budgetId: number, categoriaId: number, limite: number) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetEditAccess(userId, budget);
     await this.ensureCategoryVisible(userId, categoriaId);
     if (limite <= 0) throw new BadRequestError('VALIDACION_ERROR', 'El límite debe ser mayor que 0.');
 
@@ -269,7 +269,7 @@ export class BudgetsService {
 
   async updateCategoryLimit(userId: number, budgetId: number, categoriaId: number, limite: number) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetEditAccess(userId, budget);
     if (limite <= 0) throw new BadRequestError('VALIDACION_ERROR', 'El límite debe ser mayor que 0.');
 
     const { error } = await supabase
@@ -283,7 +283,7 @@ export class BudgetsService {
 
   async removeCategoryLimit(userId: number, budgetId: number, categoriaId: number) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetEditAccess(userId, budget);
     const { error } = await supabase
       .from('presupuesto_categorias')
       .delete()
@@ -421,7 +421,7 @@ export class BudgetsService {
 
   async inviteMember(userId: number, budgetId: number, email: string) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetAdminAccess(userId, budget);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new BadRequestError('VALIDACION_ERROR', 'El email es inválido.');
@@ -448,7 +448,7 @@ export class BudgetsService {
 
   async removeMember(userId: number, budgetId: number, targetUserId: number) {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetManageAccess(userId, budget);
+    await this.assertBudgetAdminAccess(userId, budget);
 
     if (!budget.espacio_id) {
       throw new NotFoundError('NOT_FOUND', 'Este presupuesto no tiene miembros compartidos.');
@@ -976,15 +976,27 @@ export class BudgetsService {
     return String(data.rol ?? 'miembro');
   }
 
-  private async assertBudgetManageAccess(userId: number, budget: any): Promise<void> {
+  private async assertBudgetEditAccess(userId: number, budget: any): Promise<void> {
     if (Number(budget.usuario_id) === userId) return;
     if (!budget.espacio_id) {
       throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No puede modificar este presupuesto.');
     }
 
+    await this.assertSpaceMembership(userId, Number(budget.espacio_id));
+  }
+
+  private async assertBudgetAdminAccess(userId: number, budget: any): Promise<void> {
+    if (Number(budget.usuario_id) === userId) return;
+    if (!budget.espacio_id) {
+      throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'No puede administrar este presupuesto.');
+    }
+
     const role = await this.assertSpaceMembership(userId, Number(budget.espacio_id));
     if (role !== 'admin') {
-      throw new NotFoundError('NOT_FOUND_OR_FORBIDDEN', 'Solo admins pueden modificar este presupuesto compartido.');
+      throw new NotFoundError(
+        'NOT_FOUND_OR_FORBIDDEN',
+        'Solo admins pueden administrar este presupuesto compartido.',
+      );
     }
   }
 }
