@@ -8,6 +8,7 @@ import {
   session,
   setDefaultBudget,
   updateMe,
+  deleteAccount,
 } from '../controllers/auth.controller';
 import { authMiddleware, supabaseAuthMiddleware } from '../middleware/auth';
 import { emailLimiter } from '../middleware/rate-limit.middleware';
@@ -21,6 +22,7 @@ router.post('/password/recovery', emailLimiter, requestPasswordRecovery);
 router.put('/password', authMiddleware, changePassword);
 router.get('/me', authMiddleware, me);
 router.patch('/me', authMiddleware, updateMe);
+router.delete('/me', authMiddleware, deleteAccount);
 router.patch('/me/default-budget', authMiddleware, setDefaultBudget);
 
 export default router;

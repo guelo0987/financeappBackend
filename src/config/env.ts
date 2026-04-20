@@ -12,6 +12,7 @@ const envSchema = z.object({
   FRONTEND_PUBLIC_URL: z.string().url('FRONTEND_PUBLIC_URL debe ser una URL válida').optional(),
   RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY es requerido'),
   EMAIL_FROM: z.string().email('EMAIL_FROM debe ser un email válido'),
+  SUPPORT_EMAIL: z.string().email('SUPPORT_EMAIL debe ser un email válido').optional(),
   REVENUECAT_WEBHOOK_SECRET: z.string().min(1, 'REVENUECAT_WEBHOOK_SECRET es requerido'),
   CRON_SECRET: z.string().min(1).optional(),
 });

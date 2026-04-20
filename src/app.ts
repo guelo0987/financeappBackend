@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import alertsRoutes from './routes/alerts.routes';
 import webhooksRoutes from './routes/webhooks.routes';
 import authRoutes from './routes/auth.routes';
+import publicRoutes from './routes/public.routes';
 import budgetsRoutes from './routes/budgets.routes';
 import categoriesRoutes from './routes/categories.routes';
 import dashboardRoutes from './routes/dashboard.routes';
@@ -60,6 +61,8 @@ app.get('/health', async (_req, res) => {
     res.status(503).json({ data: { status: 'degraded', db: 'unreachable' } });
   }
 });
+
+app.use(publicRoutes);
 
 // Auth routes with stricter rate limit
 app.use('/auth', authLimiter, authRoutes);

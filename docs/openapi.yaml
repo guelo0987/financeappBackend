@@ -549,6 +549,14 @@ paths:
       responses:
         "200":
           description: OK
+    delete:
+      tags: [Auth]
+      summary: Delete authenticated account
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Account deleted
   /auth/password:
     put:
       tags: [Auth]

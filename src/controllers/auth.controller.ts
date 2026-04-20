@@ -357,3 +357,21 @@ export async function setDefaultBudget(req: Request, res: Response, next: NextFu
     next(error);
   }
 }
+
+export async function deleteAccount(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.userId || !req.supabaseAuthUserId) {
+      throw new UnauthorizedError('NO_AUTORIZADO', 'No autorizado.');
+    }
+
+    await authService.deleteAccount(req.userId, req.supabaseAuthUserId);
+    res.json({
+      data: {
+        deleted: true,
+        message: 'La cuenta se eliminó correctamente.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}

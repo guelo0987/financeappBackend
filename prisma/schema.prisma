@@ -130,7 +130,7 @@ model transacciones {
   @@index([activo_id])
   @@index([categoria_id])
   @@index([presupuesto_id])
-  @@index([descripcion(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([descripcion(ops: raw("extensions.gin_trgm_ops"))], type: Gin)
   @@index([usuario_id, fecha(sort: Desc)])
   @@index([usuario_id, tipo, fecha(sort: Desc)])
 }

@@ -240,6 +240,167 @@ export class AuthService {
     }
   }
 
+  async deleteAccount(userId: number, supabaseAuthUserId: string): Promise<void> {
+    const { data: usuario, error: userError } = await supabase
+      .from('usuarios')
+      .select('email, supabase_auth_user_id')
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (userError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar la cuenta a eliminar.');
+    }
+
+    if (!usuario) {
+      throw new NotFoundError('USUARIO_NO_ENCONTRADO', 'La cuenta no existe.');
+    }
+
+    const authUserId = String(usuario.supabase_auth_user_id ?? supabaseAuthUserId ?? '').trim();
+    if (!authUserId) {
+      throw new BadRequestError(
+        'AUTH_USER_INVALIDO',
+        'No se pudo identificar la cuenta autenticada para eliminarla.',
+      );
+    }
+
+    const email = typeof usuario.email === 'string' ? usuario.email.trim().toLowerCase() : '';
+    const ownedSpaceIds = await this.fetchNumericIds(
+      'espacios_compartidos',
+      'espacio_id',
+      'creado_por',
+      userId,
+    );
+    const ownedBudgetIds = await this.fetchOwnedBudgetIds(userId, ownedSpaceIds);
+
+    await this.deleteByEq('alertas', 'usuario_id', userId, 'No se pudieron limpiar las alertas.');
+    await this.deleteByEq(
+      'transacciones_recurrentes',
+      'usuario_id',
+      userId,
+      'No se pudieron limpiar las transacciones automáticas.',
+    );
+    await this.deleteByEq(
+      'transacciones',
+      'usuario_id',
+      userId,
+      'No se pudieron limpiar las transacciones.',
+    );
+
+    if (ownedBudgetIds.length > 0) {
+      await this.deleteByIn(
+        'presupuesto_historial',
+        'presupuesto_id',
+        ownedBudgetIds,
+        'No se pudo limpiar el historial de presupuestos.',
+      );
+      await this.deleteByIn(
+        'presupuesto_ingresos',
+        'presupuesto_id',
+        ownedBudgetIds,
+        'No se pudo limpiar el plan de ingresos.',
+      );
+      await this.deleteByIn(
+        'presupuesto_categorias',
+        'presupuesto_id',
+        ownedBudgetIds,
+        'No se pudieron limpiar las categorías del presupuesto.',
+      );
+
+      const { error: resetDefaultsError } = await supabase
+        .from('usuarios')
+        .update({ presupuesto_default_id: null })
+        .in('presupuesto_default_id', ownedBudgetIds);
+
+      if (resetDefaultsError) {
+        throw new BadRequestError(
+          'DB_ERROR',
+          'No se pudieron limpiar los presupuestos por defecto asociados a esta cuenta.',
+        );
+      }
+
+      await this.deleteByIn(
+        'presupuestos',
+        'presupuesto_id',
+        ownedBudgetIds,
+        'No se pudieron eliminar los presupuestos de la cuenta.',
+      );
+    }
+
+    await this.deleteByEq('activos', 'usuario_id', userId, 'No se pudieron limpiar las cuentas.');
+    await this.deleteByEq(
+      'categorias',
+      'usuario_id',
+      userId,
+      'No se pudieron limpiar las categorías.',
+    );
+    await this.deleteByEq(
+      'suscripciones',
+      'usuario_id',
+      userId,
+      'No se pudo limpiar la suscripción asociada a la cuenta.',
+    );
+
+    await this.deleteByEq(
+      'espacio_miembros',
+      'usuario_id',
+      userId,
+      'No se pudo limpiar la membresía de espacios.',
+    );
+    await this.deleteByEq(
+      'espacio_invitaciones',
+      'invitado_por',
+      userId,
+      'No se pudieron limpiar las invitaciones enviadas por esta cuenta.',
+    );
+
+    if (email) {
+      await this.deleteByEq(
+        'espacio_invitaciones',
+        'email_invitado',
+        email,
+        'No se pudieron limpiar las invitaciones pendientes para esta cuenta.',
+      );
+    }
+
+    if (ownedSpaceIds.length > 0) {
+      await this.deleteByIn(
+        'espacio_invitaciones',
+        'espacio_id',
+        ownedSpaceIds,
+        'No se pudieron limpiar las invitaciones del espacio.',
+      );
+      await this.deleteByIn(
+        'espacio_miembros',
+        'espacio_id',
+        ownedSpaceIds,
+        'No se pudo limpiar la membresía de los espacios creados por esta cuenta.',
+      );
+      await this.deleteByIn(
+        'espacios_compartidos',
+        'espacio_id',
+        ownedSpaceIds,
+        'No se pudieron eliminar los espacios creados por esta cuenta.',
+      );
+    }
+
+    const { error: deleteProfileError } = await supabase
+      .from('usuarios')
+      .delete()
+      .eq('usuario_id', userId);
+
+    if (deleteProfileError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo eliminar el perfil local de la cuenta.');
+    }
+
+    const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(authUserId);
+    if (deleteAuthError) {
+      throw new BadRequestError(
+        'AUTH_DELETE_ERROR',
+        'No se pudo eliminar el acceso autenticado de la cuenta.',
+      );
+    }
+  }
+
   private async syncSupabaseUserInternal(user: User, dto: SupabaseSessionDTO): Promise<SyncResult> {
     const emailNormalizado = user.email!.toLowerCase().trim();
     const monedaBase = this.normalizarMonedaBase(dto.moneda_base);
@@ -486,6 +647,73 @@ export class AuthService {
         espacio_id: inv.espacio_id,
       });
       if (alertError) console.error('Error creando alerta de invitación aceptada:', alertError);
+    }
+  }
+
+  private async fetchNumericIds(
+    table: string,
+    idColumn: string,
+    matchColumn: string,
+    value: number,
+  ): Promise<number[]> {
+    const { data, error } = await supabase
+      .from(table)
+      .select(idColumn)
+      .eq(matchColumn, value);
+
+    if (error) {
+      throw new BadRequestError('DB_ERROR', `No se pudieron consultar registros en ${table}.`);
+    }
+
+    return (data ?? [])
+      .map((row: any) => Number(row[idColumn]))
+      .filter((id: number) => Number.isFinite(id));
+  }
+
+  private async fetchOwnedBudgetIds(userId: number, ownedSpaceIds: number[]): Promise<number[]> {
+    let query = supabase.from('presupuestos').select('presupuesto_id');
+    if (ownedSpaceIds.length > 0) {
+      query = query.or(`usuario_id.eq.${userId},espacio_id.in.(${ownedSpaceIds.join(',')})`);
+    } else {
+      query = query.eq('usuario_id', userId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new BadRequestError('DB_ERROR', 'No se pudieron consultar los presupuestos de la cuenta.');
+    }
+
+    return Array.from(
+      new Set(
+        (data ?? [])
+          .map((row: any) => Number(row.presupuesto_id))
+          .filter((id: number) => Number.isFinite(id)),
+      ),
+    );
+  }
+
+  private async deleteByEq(
+    table: string,
+    matchColumn: string,
+    value: string | number,
+    message: string,
+  ): Promise<void> {
+    const { error } = await supabase.from(table).delete().eq(matchColumn, value);
+    if (error) {
+      throw new BadRequestError('DB_ERROR', message);
+    }
+  }
+
+  private async deleteByIn(
+    table: string,
+    matchColumn: string,
+    values: number[],
+    message: string,
+  ): Promise<void> {
+    if (!values.length) return;
+    const { error } = await supabase.from(table).delete().in(matchColumn, values);
+    if (error) {
+      throw new BadRequestError('DB_ERROR', message);
     }
   }
 
