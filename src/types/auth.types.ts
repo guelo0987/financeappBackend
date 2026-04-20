@@ -10,6 +10,16 @@ export interface SupabaseSessionDTO {
   moneda_base?: 'DOP' | 'USD';
 }
 
+export interface ChangePasswordDTO {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface PasswordRecoveryRequestDTO {
+  email: string;
+  next?: string;
+}
+
 export interface AuthSessionResponse {
   usuario: UsuarioPublico;
   isNewUser: boolean;

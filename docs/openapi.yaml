@@ -4,7 +4,7 @@ info:
   version: 2.0.0
   description: Swagger documentation for the Menudo backend.
 servers:
-  - url: http://localhost:3000
+  - url: https://financeapp-backend-eight.vercel.app
 tags:
   - name: Health
   - name: Auth
@@ -566,6 +566,26 @@ paths:
                 currentPassword:
                   type: string
                 newPassword:
+                  type: string
+      responses:
+        "200":
+          description: OK
+  /auth/password/recovery:
+    post:
+      tags: [Auth]
+      summary: Send password recovery link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                next:
                   type: string
       responses:
         "200":

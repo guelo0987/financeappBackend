@@ -1,4 +1,5 @@
-import { User } from '@supabase/supabase-js';
+import { createClient, User } from '@supabase/supabase-js';
+import { env } from '../config/env';
 import { getSupabaseClient } from '../config/supabase';
 import {
   BadRequestError,
@@ -8,6 +9,8 @@ import {
 } from '../utils/errors';
 import {
   AuthSessionResponse,
+  ChangePasswordDTO,
+  PasswordRecoveryRequestDTO,
   SupabaseSessionDTO,
   UpdateProfileDTO,
   UsuarioPublico,
@@ -152,6 +155,91 @@ export class AuthService {
     }
   }
 
+  async requestPasswordRecovery(dto: PasswordRecoveryRequestDTO): Promise<void> {
+    const email = dto.email?.trim().toLowerCase();
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new BadRequestError('EMAIL_INVALIDO', 'Debes enviar un correo válido.');
+    }
+
+    const redirectTo = this.buildPublicAuthUrl('/auth/reset-password', dto.next);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+
+    if (error) {
+      throw new BadRequestError(
+        'AUTH_RECOVERY_ERROR',
+        'No se pudo enviar el enlace para cambiar la contraseña.',
+      );
+    }
+  }
+
+  async changePassword(userId: number, dto: ChangePasswordDTO): Promise<void> {
+    const currentPassword = dto.currentPassword?.trim() ?? '';
+    const newPassword = dto.newPassword?.trim() ?? '';
+
+    if (!currentPassword || !newPassword) {
+      throw new BadRequestError(
+        'PASSWORD_REQUERIDA',
+        'Debes enviar tu contraseña actual y la nueva.',
+      );
+    }
+    if (newPassword.length < 6) {
+      throw new BadRequestError(
+        'PASSWORD_INVALIDA',
+        'La nueva contraseña debe tener al menos 6 caracteres.',
+      );
+    }
+    if (currentPassword === newPassword) {
+      throw new BadRequestError(
+        'PASSWORD_SIN_CAMBIO',
+        'La nueva contraseña debe ser distinta a la actual.',
+      );
+    }
+
+    const { data: usuario, error: userError } = await supabase
+      .from('usuarios')
+      .select('email, supabase_auth_user_id')
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (userError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar el usuario.');
+    }
+
+    if (!usuario?.email || !usuario?.supabase_auth_user_id) {
+      throw new NotFoundError(
+        'USUARIO_NO_ENCONTRADO',
+        'La cuenta todavía no está lista para cambiar la contraseña.',
+      );
+    }
+
+    const isolatedClient = this.createIsolatedSupabaseClient();
+    const { data: signInData, error: signInError } = await isolatedClient.auth.signInWithPassword({
+      email: usuario.email,
+      password: currentPassword,
+    });
+
+    if (signInError || !signInData.user) {
+      throw new UnauthorizedError(
+        'PASSWORD_ACTUAL_INVALIDA',
+        'La contraseña actual no es correcta.',
+      );
+    }
+
+    const { error: updateError } = await supabase.auth.admin.updateUserById(
+      usuario.supabase_auth_user_id,
+      { password: newPassword },
+    );
+
+    if (updateError) {
+      throw new BadRequestError(
+        'AUTH_PASSWORD_UPDATE_ERROR',
+        'No se pudo actualizar la contraseña.',
+      );
+    }
+  }
+
   private async syncSupabaseUserInternal(user: User, dto: SupabaseSessionDTO): Promise<SyncResult> {
     const emailNormalizado = user.email!.toLowerCase().trim();
     const monedaBase = this.normalizarMonedaBase(dto.moneda_base);
@@ -262,6 +350,28 @@ export class AuthService {
     if (!monedaBase) return 'DOP';
     if (monedaBase === 'DOP' || monedaBase === 'USD') return monedaBase;
     throw new BadRequestError('MONEDA_INVALIDA', 'La moneda base debe ser DOP o USD.');
+  }
+
+  private createIsolatedSupabaseClient() {
+    return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+  }
+
+  private buildPublicAuthUrl(path: string, next?: string): string {
+    const baseUrl = env.BACKEND_PUBLIC_URL ?? 'https://financeapp-backend-eight.vercel.app';
+    const url = new URL(baseUrl);
+    url.pathname = path;
+    url.search = '';
+
+    if (typeof next === 'string' && next.trim()) {
+      url.searchParams.set('next', next.trim());
+    }
+
+    return url.toString();
   }
 
   private obtenerNombreUsuario(user: User): string {

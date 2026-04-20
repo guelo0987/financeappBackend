@@ -1,9 +1,30 @@
 import { Request, Response, NextFunction } from 'express';
+import { env } from '../config/env';
 import { AuthService } from '../services/auth.service';
-import { SupabaseSessionDTO, UpdateProfileDTO } from '../types/auth.types';
+import {
+  ChangePasswordDTO,
+  PasswordRecoveryRequestDTO,
+  SupabaseSessionDTO,
+  UpdateProfileDTO,
+} from '../types/auth.types';
 import { UnauthorizedError } from '../utils/errors';
 
 const authService = new AuthService();
+const trustedRedirectHosts = new Set(
+  [
+    env.BACKEND_PUBLIC_URL ?? 'https://financeapp-backend-eight.vercel.app',
+    env.FRONTEND_PUBLIC_URL,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => {
+      try {
+        return new URL(value).hostname.toLowerCase();
+      } catch (_) {
+        return '';
+      }
+    })
+    .filter(Boolean),
+);
 
 function resolveSafeNextUrl(rawNext: unknown): string | null {
   if (typeof rawNext !== 'string' || !rawNext.trim()) return null;
@@ -17,10 +38,7 @@ function resolveSafeNextUrl(rawNext: unknown): string | null {
       return nextUrl.toString();
     }
 
-    if ((protocol === 'https:' || protocol === 'http:') &&
-        host !== 'localhost' &&
-        host !== '127.0.0.1' &&
-        host !== '0.0.0.0') {
+    if (protocol === 'https:' && trustedRedirectHosts.has(host)) {
       return nextUrl.toString();
     }
   } catch (_) {
@@ -30,18 +48,43 @@ function resolveSafeNextUrl(rawNext: unknown): string | null {
   return null;
 }
 
-export async function confirmEmailRedirectPage(req: Request, res: Response): Promise<void> {
-  const nextUrl = resolveSafeNextUrl(req.query.next);
+function applyBridgeHeaders(res: Response): Response {
+  return res
+    .set('Cache-Control', 'no-store, max-age=0')
+    .set('Pragma', 'no-cache')
+    .set('Referrer-Policy', 'no-referrer')
+    .set('X-Robots-Tag', 'noindex, nofollow');
+}
 
-  res
-    .status(200)
-    .type('html')
-    .send(`<!DOCTYPE html>
+function renderAuthBridgePage({
+  nextUrl,
+  initialTitle,
+  initialMessage,
+  successTitle,
+  successMessageWithDestination,
+  successMessageWithoutDestination,
+  errorTitle,
+  errorFallbackMessage,
+  errorHint,
+}: {
+  nextUrl: string | null;
+  initialTitle: string;
+  initialMessage: string;
+  successTitle: string;
+  successMessageWithDestination: string;
+  successMessageWithoutDestination: string;
+  errorTitle: string;
+  errorFallbackMessage: string;
+  errorHint: string;
+}): string {
+  return `<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Confirmando correo — Menudo</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#065f46" />
+    <title>${initialTitle} — Menudo</title>
     <style>
       body {
         margin: 0;
@@ -125,23 +168,11 @@ export async function confirmEmailRedirectPage(req: Request, res: Response): Pro
     <main>
       <section class="card">
         <div class="badge">Menudo</div>
-        <h1 id="title">Confirmando tu correo</h1>
-        <p id="message">Estamos validando tu enlace. En cuanto terminemos, te llevaremos al siguiente paso.</p>
+        <h1 id="title">${initialTitle}</h1>
+        <p id="message">${initialMessage}</p>
         <div class="actions">
-          <a
-            id="open-link"
-            class="button button-primary hidden"
-            href="#"
-          >
-            Abrir Menudo
-          </a>
-          <a
-            id="continue-link"
-            class="button button-secondary hidden"
-            href="#"
-          >
-            Continuar
-          </a>
+          <a id="open-link" class="button button-primary hidden" href="#">Abrir Menudo</a>
+          <a id="continue-link" class="button button-secondary hidden" href="#">Continuar</a>
         </div>
         <p class="hint" id="hint">Si no pasa nada automáticamente, usa el botón cuando aparezca.</p>
       </section>
@@ -160,16 +191,15 @@ export async function confirmEmailRedirectPage(req: Request, res: Response): Pro
       const destination = nextUrl ? nextUrl + hash : null;
 
       if (hasError) {
-        titleEl.textContent = 'No pudimos confirmar tu correo';
-        messageEl.textContent = hashParams.get('error_description') || 'El enlace ya expiró o no es válido. Pide uno nuevo desde Menudo.';
-        hintEl.textContent = 'Vuelve a la app y solicita otro correo de confirmación.';
+        titleEl.textContent = ${JSON.stringify(errorTitle)};
+        messageEl.textContent =
+          hashParams.get('error_description') || ${JSON.stringify(errorFallbackMessage)};
+        hintEl.textContent = ${JSON.stringify(errorHint)};
       } else if (hashParams.has('access_token')) {
-        titleEl.textContent = 'Correo confirmado';
+        titleEl.textContent = ${JSON.stringify(successTitle)};
         messageEl.textContent = destination
-          ? 'Tu cuenta ya fue verificada. Vamos a abrir Menudo para que puedas entrar.'
-          : 'Tu cuenta ya fue verificada. Ahora vuelve a Menudo y entra con tu correo y contraseña.';
-      } else {
-        messageEl.textContent = 'Estamos esperando la respuesta de confirmación. Si ya abriste el enlace completo desde tu correo, esta página se actualizará sola.';
+          ? ${JSON.stringify(successMessageWithDestination)}
+          : ${JSON.stringify(successMessageWithoutDestination)};
       }
 
       if (destination) {
@@ -189,7 +219,57 @@ export async function confirmEmailRedirectPage(req: Request, res: Response): Pro
       }
     </script>
   </body>
-</html>`);
+</html>`;
+}
+
+export async function confirmEmailRedirectPage(req: Request, res: Response): Promise<void> {
+  const nextUrl = resolveSafeNextUrl(req.query.next);
+
+  applyBridgeHeaders(res)
+    .status(200)
+    .type('html')
+    .send(
+      renderAuthBridgePage({
+        nextUrl,
+        initialTitle: 'Confirmando tu correo',
+        initialMessage:
+          'Estamos validando tu enlace. En cuanto terminemos, te llevaremos al siguiente paso.',
+        successTitle: 'Correo confirmado',
+        successMessageWithDestination:
+          'Tu cuenta ya fue verificada. Vamos a abrir Menudo para que puedas entrar.',
+        successMessageWithoutDestination:
+          'Tu cuenta ya fue verificada. Ahora vuelve a Menudo y entra con tu correo y contraseña.',
+        errorTitle: 'No pudimos confirmar tu correo',
+        errorFallbackMessage:
+          'El enlace ya expiró o no es válido. Pide uno nuevo desde Menudo.',
+        errorHint: 'Vuelve a la app y solicita otro correo de confirmación.',
+      }),
+    );
+}
+
+export async function passwordRecoveryRedirectPage(req: Request, res: Response): Promise<void> {
+  const nextUrl = resolveSafeNextUrl(req.query.next);
+
+  applyBridgeHeaders(res)
+    .status(200)
+    .type('html')
+    .send(
+      renderAuthBridgePage({
+        nextUrl,
+        initialTitle: 'Preparando tu cambio de contraseña',
+        initialMessage:
+          'Estamos validando el enlace para que puedas crear una contraseña nueva.',
+        successTitle: 'Listo para cambiar tu contraseña',
+        successMessageWithDestination:
+          'Tu enlace es válido. Vamos a abrir Menudo para que escribas tu nueva contraseña.',
+        successMessageWithoutDestination:
+          'Tu enlace es válido. Vuelve a Menudo para escribir tu nueva contraseña.',
+        errorTitle: 'No pudimos abrir el cambio de contraseña',
+        errorFallbackMessage:
+          'El enlace ya expiró o no es válido. Solicita uno nuevo desde Menudo.',
+        errorHint: 'Vuelve a la app y pide un enlace nuevo para recuperar tu acceso.',
+      }),
+    );
 }
 
 export async function session(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -203,6 +283,41 @@ export async function session(req: Request, res: Response, next: NextFunction): 
       req.body as SupabaseSessionDTO,
     );
     res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function requestPasswordRecovery(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const nextUrl = resolveSafeNextUrl(req.body?.next);
+    await authService.requestPasswordRecovery({
+      ...(req.body as PasswordRecoveryRequestDTO),
+      next: nextUrl ?? undefined,
+    });
+    res.json({
+      data: {
+        sent: true,
+        message:
+          'Si la cuenta existe, enviamos un enlace para cambiar la contraseña.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function changePassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.userId) {
+      throw new UnauthorizedError('NO_AUTORIZADO', 'No autorizado.');
+    }
+    await authService.changePassword(req.userId, req.body as ChangePasswordDTO);
+    res.json({ data: { updated: true } });
   } catch (error) {
     next(error);
   }
