@@ -10,6 +10,7 @@ import {
   getBudgets,
   getBudgetSpending,
   inviteBudgetMember,
+  leaveBudget,
   listBudgetMembers,
   removeBudgetMember,
   updateBudget,
@@ -26,6 +27,7 @@ router.post('/', createBudget);
 router.get('/:id', getBudgetById);
 router.put('/:id', updateBudget);
 router.delete('/:id', deleteBudget);
+router.delete('/:id/leave', leaveBudget);
 router.patch('/:id/activate', activateBudget);
 router.get('/:id/spending', getBudgetSpending);
 router.get('/:id/history', getBudgetHistory);

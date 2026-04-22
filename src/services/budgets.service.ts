@@ -221,13 +221,151 @@ export class BudgetsService {
 
   async delete(userId: number, budgetId: number): Promise<void> {
     const budget = await this.getAccessibleBudget(userId, budgetId);
-    await this.assertBudgetAdminAccess(userId, budget);
-    const { error } = await supabase
+    if (Number(budget.usuario_id) !== userId) {
+      throw new BadRequestError(
+        'SOLO_PROPIETARIO_ELIMINA',
+        'Solo quien creó el presupuesto puede eliminarlo.',
+      );
+    }
+    const ownedSpaceId = budget.espacio_id ? Number(budget.espacio_id) : null;
+
+    const deleteByEq = async (
+      table: string,
+      column: string,
+      value: number,
+      message: string,
+    ) => {
+      const { error } = await supabase.from(table).delete().eq(column, value);
+      if (error) {
+        throw new BadRequestError('DB_ERROR', message);
+      }
+    };
+
+    await deleteByEq(
+      'presupuesto_historial',
+      'presupuesto_id',
+      budgetId,
+      'No se pudo limpiar el historial del presupuesto.',
+    );
+    await deleteByEq(
+      'presupuesto_ingresos',
+      'presupuesto_id',
+      budgetId,
+      'No se pudo limpiar el plan de ingresos del presupuesto.',
+    );
+    await deleteByEq(
+      'presupuesto_categorias',
+      'presupuesto_id',
+      budgetId,
+      'No se pudieron limpiar los límites por categoría del presupuesto.',
+    );
+    await deleteByEq(
+      'transacciones',
+      'presupuesto_id',
+      budgetId,
+      'No se pudieron limpiar las transacciones del presupuesto.',
+    );
+
+    const { error: resetDefaultsError } = await supabase
+      .from('usuarios')
+      .update({ presupuesto_default_id: null })
+      .eq('presupuesto_default_id', budgetId);
+
+    if (resetDefaultsError) {
+      throw new BadRequestError(
+        'DB_ERROR',
+        'No se pudo limpiar el presupuesto por defecto asociado.',
+      );
+    }
+
+    if (ownedSpaceId != null) {
+      await deleteByEq(
+        'espacio_invitaciones',
+        'espacio_id',
+        ownedSpaceId,
+        'No se pudieron limpiar las invitaciones del presupuesto compartido.',
+      );
+      await deleteByEq(
+        'espacio_miembros',
+        'espacio_id',
+        ownedSpaceId,
+        'No se pudieron limpiar los miembros del presupuesto compartido.',
+      );
+    }
+
+    const { error: deleteBudgetError } = await supabase
       .from('presupuestos')
       .delete()
       .eq('presupuesto_id', budgetId);
 
-    if (error) throw new BadRequestError('DB_ERROR', 'No se pudo eliminar el presupuesto.');
+    if (deleteBudgetError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo eliminar el presupuesto.');
+    }
+
+    if (ownedSpaceId != null) {
+      await deleteByEq(
+        'espacios_compartidos',
+        'espacio_id',
+        ownedSpaceId,
+        'No se pudo limpiar el espacio compartido asociado al presupuesto.',
+      );
+    }
+  }
+
+  async leave(userId: number, budgetId: number): Promise<void> {
+    const budget = await this.getAccessibleBudget(userId, budgetId);
+
+    if (Number(budget.usuario_id) === userId) {
+      throw new BadRequestError(
+        'PROPIETARIO_NO_PUEDE_SALIR',
+        'Quien creó el presupuesto no puede salir. Si quieres quitarlo, elimínalo.',
+      );
+    }
+
+    if (!budget.espacio_id) {
+      throw new BadRequestError(
+        'PRESUPUESTO_NO_COMPARTIDO',
+        'Este presupuesto no es compartido.',
+      );
+    }
+
+    const espacioId = Number(budget.espacio_id);
+    const { data: member, error: memberError } = await supabase
+      .from('espacio_miembros')
+      .select('usuario_id')
+      .eq('espacio_id', espacioId)
+      .eq('usuario_id', userId)
+      .maybeSingle();
+
+    if (memberError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo validar la membresía del presupuesto.');
+    }
+    if (!member) {
+      throw new NotFoundError('NOT_FOUND', 'Ya no tienes acceso a este presupuesto.');
+    }
+
+    const { error: removeError } = await supabase
+      .from('espacio_miembros')
+      .delete()
+      .eq('espacio_id', espacioId)
+      .eq('usuario_id', userId);
+
+    if (removeError) {
+      throw new BadRequestError('DB_ERROR', 'No se pudo salir del presupuesto.');
+    }
+
+    const { error: resetDefaultError } = await supabase
+      .from('usuarios')
+      .update({ presupuesto_default_id: null })
+      .eq('usuario_id', userId)
+      .eq('presupuesto_default_id', budgetId);
+
+    if (resetDefaultError) {
+      throw new BadRequestError(
+        'DB_ERROR',
+        'Saliste del presupuesto, pero no se pudo limpiar tu presupuesto por defecto.',
+      );
+    }
   }
 
   async setActive(userId: number, budgetId: number): Promise<void> {
@@ -926,6 +1064,7 @@ export class BudgetsService {
   private mapBudget(row: any) {
     return {
       id: Number(row.presupuesto_id),
+      usuario_id: Number(row.usuario_id),
       nombre: row.nombre,
       periodo: row.periodo,
       dia_inicio: Number(row.dia_inicio),

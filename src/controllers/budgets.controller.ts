@@ -76,6 +76,16 @@ export async function activateBudget(req: Request, res: Response, next: NextFunc
   }
 }
 
+export async function leaveBudget(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const budgetId = parsePositiveInt(req.params.id, 'budgetId');
+    await budgetsService.leave(requireUserId(req), budgetId);
+    res.json({ data: { left: true } });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getBudgetSpending(
   req: Request,
   res: Response,
@@ -180,4 +190,3 @@ export async function deleteBudgetCategory(
     next(error);
   }
 }
-
