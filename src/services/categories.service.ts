@@ -287,10 +287,19 @@ export class CategoriesService {
   async delete(userId: number, categoryId: number): Promise<void> {
     await this.getOwnedMutableCategory(userId, categoryId);
 
-    // Check for references in transactions or budgets before deleting
-    const [{ count: txCount }, { count: budgetCount }] = await Promise.all([
+    // Check for references before deleting
+    const [
+      { count: txCount },
+      { count: budgetCount },
+      { count: incomeBudgetCount },
+      { count: recurringCount },
+      { count: childCount },
+    ] = await Promise.all([
       supabase.from('transacciones').select('transaccion_id', { count: 'exact', head: true }).eq('categoria_id', categoryId).limit(1),
       supabase.from('presupuesto_categorias').select('presupuesto_id', { count: 'exact', head: true }).eq('categoria_id', categoryId).limit(1),
+      supabase.from('presupuesto_ingresos').select('presupuesto_id', { count: 'exact', head: true }).eq('categoria_id', categoryId).limit(1),
+      supabase.from('transacciones_recurrentes').select('recurrente_id', { count: 'exact', head: true }).eq('categoria_id', categoryId).limit(1),
+      supabase.from('categorias').select('categoria_id', { count: 'exact', head: true }).eq('categoria_padre_id', categoryId).limit(1),
     ]);
 
     if ((txCount ?? 0) > 0) {
@@ -298,6 +307,15 @@ export class CategoriesService {
     }
     if ((budgetCount ?? 0) > 0) {
       throw new ConflictError('CATEGORIA_EN_PRESUPUESTO', 'No se puede eliminar una categoría que está en uso en un presupuesto.');
+    }
+    if ((incomeBudgetCount ?? 0) > 0) {
+      throw new ConflictError('CATEGORIA_EN_PRESUPUESTO', 'No se puede eliminar una categoría que está en uso en un presupuesto.');
+    }
+    if ((recurringCount ?? 0) > 0) {
+      throw new ConflictError('CATEGORIA_CON_TRANSACCIONES', 'No se puede eliminar una categoría que tiene movimientos automáticos asociados.');
+    }
+    if ((childCount ?? 0) > 0) {
+      throw new ConflictError('CATEGORIA_CON_SUBCATEGORIAS', 'No se puede eliminar una categoría que todavía tiene subcategorías.');
     }
 
     const { error } = await supabase
